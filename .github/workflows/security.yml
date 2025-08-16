@@ -6,6 +6,10 @@ on:
       - '**/Cargo.lock'
   workflow_dispatch:
 
+permissions:
+  issues: write
+  checks: write
+  
 jobs:
   security_audit:
     runs-on: ubuntu-latest
