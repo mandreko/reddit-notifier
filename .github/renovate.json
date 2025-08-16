@@ -11,6 +11,6 @@
       "groupName": "github-action minor",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["minor", "patch"]
-    },
+    }
   ]
 }
