@@ -1,6 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "enabledManagers": ["cargo", "github-actions"],
+  "dependencyDashboard": true,
   "packageRules": [
     {
       "groupName": "cargo minor",
