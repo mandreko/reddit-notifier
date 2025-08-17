@@ -1,8 +1,9 @@
 FROM alpine:latest AS certs
 RUN apk --no-cache add ca-certificates
 
-FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-alpine AS chef
 WORKDIR /app
+RUN apk --no-cache add musl-dev openssl-dev openssl-libs-static
 
 FROM chef AS planner
 COPY . .
@@ -24,7 +25,7 @@ RUN --mount=type=cache,target=/root/.cargo \
 
 FROM scratch
 LABEL authors="Matt Andreko <mandreko@gmail.com>"
-LABEL org.opencontainers.image.source=https://github.com/mandreko/reddit-discord-notification-bot
+LABEL org.opencontainers.image.source=https://github.com/mandreko/reddit-notifier
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /app/target/release/reddit-notifier /app/
 USER 65534
