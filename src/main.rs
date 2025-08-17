@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use dotenvy::dotenv;
 use reqwest::Client;
-use sqlx::SqlitePool;
+use sqlx::{SqlitePool, Sqlite};
+use sqlx::migrate::MigrateDatabase;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -24,12 +25,20 @@ async fn main() -> Result<()> {
 
     let cfg = AppConfig::from_env()?;
 
+    // Create database file if it doesn't exist
+    if !Sqlite::database_exists(&cfg.database_url).await? {
+        Sqlite::create_database(&cfg.database_url).await?;
+    }
+
     let pool = SqlitePool::connect(&cfg.database_url)
         .await
         .with_context(|| format!("failed to connect to {}", cfg.database_url))?;
 
-    // Apply migrations at startup so schema matches ./migrations
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    // Apply migrations at startup
+    sqlx::migrate!()
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations");
 
     let client = Client::builder()
         .user_agent(cfg.reddit_user_agent.clone())
