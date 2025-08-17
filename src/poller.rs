@@ -15,7 +15,7 @@ pub async fn poll_subreddit_loop(
 ) -> Result<()> {
     info!(target: "reddit_notifier", "Spawned poller for r/{}", subreddit);
     let reddit_base = "https://www.reddit.com";
-    let json_url = format!("{}/r/{}/new.json?limit=1", reddit_base, subreddit);
+    let json_url = format!("{}/r/{}/new.json?limit=10", reddit_base, subreddit);
 
     loop {
         match client.get(&json_url).send().await {
