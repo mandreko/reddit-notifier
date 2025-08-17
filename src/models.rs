@@ -34,6 +34,7 @@ pub enum EndpointKind {
 }
 
 impl EndpointKind {
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Discord => "discord",
@@ -54,6 +55,7 @@ pub struct EndpointRow {
     pub id: i64,
     pub kind: EndpointKind,
     pub config_json: String,
+    #[allow(dead_code)]
     pub active: bool,
 }
 
