@@ -29,5 +29,5 @@ LABEL org.opencontainers.image.source=https://github.com/mandreko/reddit-notifie
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /app/target/release/reddit-notifier /app/
 USER 65534
-VOLUME /data
+#VOLUME /data
 CMD ["/app/reddit-notifier"]

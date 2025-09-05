@@ -1,0 +1,31 @@
+services:
+  db:
+    container_name: db
+    image: postgres:latest
+    restart: unless-stopped
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=MySuperSecretP4ssw0rd
+      - POSTGRES_DB=reddit-notifier
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    volumes:
+      - db_data:/var/lib/postgresql/data
+  reddit-notifier:
+    container_name: reddit-notifier
+    build:
+      context: .
+      dockerfile: Dockerfile
+#    build:
+#      context: .
+#      network: host
+#      target: final
+#      args:
+#        DATABASE_URL: postgres://postgres:123@db:5432/reddit-notifier
+    environment:
+      - DATABASE_URL=postgres://postgres:MySuperSecretP4ssw0rd@db:5432/reddit-notifier
+    depends_on:
+      - db
+volumes:
+  db_data: {}

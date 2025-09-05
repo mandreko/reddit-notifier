@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use dotenvy::dotenv;
 use reqwest::Client;
-use sqlx::{SqlitePool, Sqlite};
-use sqlx::migrate::MigrateDatabase;
+use sqlx::postgres::PgPoolOptions;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -25,14 +24,15 @@ async fn main() -> Result<()> {
 
     let cfg = AppConfig::from_env()?;
 
-    // Create database file if it doesn't exist
-    if !Sqlite::database_exists(&cfg.database_url).await? {
-        Sqlite::create_database(&cfg.database_url).await?;
-    }
+    // // Create database file if it doesn't exist
+    // if !Sqlite::database_exists(&cfg.database_url).await? {
+    //     Sqlite::create_database(&cfg.database_url).await?;
+    // }
 
-    let pool = SqlitePool::connect(&cfg.database_url)
-        .await
-        .with_context(|| format!("failed to connect to {}", cfg.database_url))?;
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&cfg.database_url)
+        .await.with_context(|| format!("failed to connect to {}", cfg.database_url))?;
 
     // Apply migrations at startup
     sqlx::migrate!()

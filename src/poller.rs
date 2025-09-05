@@ -1,6 +1,6 @@
 use anyhow::Result;
 use reqwest::Client;
-use sqlx::SqlitePool;
+use sqlx::{Pool, Postgres};
 use std::{collections::HashSet, time::Duration};
 use tracing::{info, warn, error};
 
@@ -8,7 +8,7 @@ use crate::database::{endpoints_for_subreddit, record_if_new};
 use crate::models::RedditListing;
 
 pub async fn poll_subreddit_loop(
-    pool: SqlitePool,
+    pool: Pool<Postgres>,
     client: Client,
     subreddit: String,
     poll_interval_secs: u64,

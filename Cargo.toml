@@ -11,7 +11,7 @@ tokio = { version = "1.39", features = ["macros", "rt-multi-thread", "time"] }
 reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "macros"] }
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "macros"] }
 dotenvy = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

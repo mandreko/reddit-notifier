@@ -52,7 +52,7 @@ impl EndpointKind {
 
 #[derive(Debug, Clone)]
 pub struct EndpointRow {
-    pub id: i64,
+    pub id: i32,
     pub kind: EndpointKind,
     pub config_json: String,
     #[allow(dead_code)]
