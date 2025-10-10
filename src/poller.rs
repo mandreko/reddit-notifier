@@ -3,6 +3,7 @@ use reqwest::Client;
 use sqlx::SqlitePool;
 use std::{collections::HashSet, time::Duration};
 use tracing::{info, warn, error};
+use chrono::{Utc, TimeDelta};
 
 use crate::database::{endpoints_for_subreddit, record_if_new};
 use crate::models::RedditListing;
@@ -38,8 +39,20 @@ pub async fn poll_subreddit_loop(
 
                     for child in listing.data.children {
                         let post = child.data;
+
+                        // Check if post is within ±24 hours
+                        // This was added because Reddit's API would randomly return old posts that we alerted on and users hated
+                        let now = Utc::now();
+                        let time_diff = now.signed_duration_since(post.created_utc);
+                        let is_within_24h = time_diff.abs() <= TimeDelta::hours(24);
+                        if !is_within_24h {
+                            info!("Skipping post {} - outside 24h window (posted: {})", post.id, post.created_utc);
+                            continue;
+                        }
+
                         let is_new = record_if_new(&pool, &subreddit, &post.id).await?;
                         if !is_new {
+                            info!("Skipping post {} - already seen", post.id);
                             continue;
                         }
 

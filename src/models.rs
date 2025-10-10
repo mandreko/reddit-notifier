@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use serde_with::{serde_as, TimestampSecondsWithFrac};
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -89,11 +91,13 @@ pub struct RedditListingData {
 pub struct RedditChild {
     pub data: RedditPost,
 }
-
+#[serde_as]
 #[derive(Debug, Deserialize)]
 pub struct RedditPost {
     pub id: String,
     pub title: String,
     pub permalink: Option<String>,
     pub url: Option<String>,
+    #[serde_as(as = "TimestampSecondsWithFrac<f64>")]
+    pub created_utc: DateTime<Utc>
 }
