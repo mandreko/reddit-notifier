@@ -26,7 +26,7 @@ pub async fn unique_subreddits(pool: &SqlitePool) -> Result<Vec<String>> {
 pub async fn endpoints_for_subreddit(pool: &SqlitePool, subreddit: &str) -> Result<Vec<EndpointRow>> {
     let rows = sqlx::query(
         r#"
-        SELECT e.id as id, e.kind as kind, e.config_json as config_json, e.active as active
+        SELECT e.id as id, e.kind as kind, e.config_json as config_json, e.active as active, e.note as note
         FROM endpoints e
         JOIN subscription_endpoints se ON se.endpoint_id = e.id
         JOIN subscriptions s ON s.id = se.subscription_id
@@ -39,6 +39,7 @@ pub async fn endpoints_for_subreddit(pool: &SqlitePool, subreddit: &str) -> Resu
         kind: EndpointKind::from_str(row.get::<String, _>("kind").as_str()).unwrap(),
         config_json: row.get::<String, _>("config_json"),
         active: row.get::<i64, _>("active") != 0,
+        note: row.get::<Option<String>, _>("note"),
     })
     .fetch_all(pool)
     .await?;
@@ -127,7 +128,7 @@ pub async fn delete_subscription(pool: &SqlitePool, id: i64) -> Result<()> {
 pub async fn get_subscription_endpoints(pool: &SqlitePool, subscription_id: i64) -> Result<Vec<EndpointRow>> {
     let rows = sqlx::query(
         r#"
-        SELECT e.id, e.kind, e.config_json, e.active
+        SELECT e.id, e.kind, e.config_json, e.active, e.note
         FROM endpoints e
         JOIN subscription_endpoints se ON se.endpoint_id = e.id
         WHERE se.subscription_id = ?1
@@ -140,6 +141,7 @@ pub async fn get_subscription_endpoints(pool: &SqlitePool, subscription_id: i64)
         kind: EndpointKind::from_str(row.get::<String, _>("kind").as_str()).unwrap(),
         config_json: row.get::<String, _>("config_json"),
         active: row.get::<i64, _>("active") != 0,
+        note: row.get::<Option<String>, _>("note"),
     })
     .fetch_all(pool)
     .await?;
@@ -153,7 +155,7 @@ pub async fn get_subscription_endpoints(pool: &SqlitePool, subscription_id: i64)
 pub async fn list_endpoints(pool: &SqlitePool) -> Result<Vec<EndpointRow>> {
     let rows = sqlx::query(
         r#"
-        SELECT id, kind, config_json, active
+        SELECT id, kind, config_json, active, note
         FROM endpoints
         ORDER BY id
         "#,
@@ -163,6 +165,7 @@ pub async fn list_endpoints(pool: &SqlitePool) -> Result<Vec<EndpointRow>> {
         kind: EndpointKind::from_str(row.get::<String, _>("kind").as_str()).unwrap(),
         config_json: row.get::<String, _>("config_json"),
         active: row.get::<i64, _>("active") != 0,
+        note: row.get::<Option<String>, _>("note"),
     })
     .fetch_all(pool)
     .await?;
@@ -174,7 +177,7 @@ pub async fn list_endpoints(pool: &SqlitePool) -> Result<Vec<EndpointRow>> {
 pub async fn get_endpoint(pool: &SqlitePool, id: i64) -> Result<EndpointRow> {
     let row = sqlx::query(
         r#"
-        SELECT id, kind, config_json, active
+        SELECT id, kind, config_json, active, note
         FROM endpoints
         WHERE id = ?1
         "#,
@@ -185,6 +188,7 @@ pub async fn get_endpoint(pool: &SqlitePool, id: i64) -> Result<EndpointRow> {
         kind: EndpointKind::from_str(row.get::<String, _>("kind").as_str()).unwrap(),
         config_json: row.get::<String, _>("config_json"),
         active: row.get::<i64, _>("active") != 0,
+        note: row.get::<Option<String>, _>("note"),
     })
     .fetch_one(pool)
     .await?;
@@ -193,31 +197,33 @@ pub async fn get_endpoint(pool: &SqlitePool, id: i64) -> Result<EndpointRow> {
 }
 
 /// Create a new endpoint
-pub async fn create_endpoint(pool: &SqlitePool, kind: &str, config_json: &str) -> Result<i64> {
+pub async fn create_endpoint(pool: &SqlitePool, kind: &str, config_json: &str, note: Option<&str>) -> Result<i64> {
     let res = sqlx::query(
         r#"
-        INSERT INTO endpoints (kind, config_json)
-        VALUES (?1, ?2)
+        INSERT INTO endpoints (kind, config_json, note)
+        VALUES (?1, ?2, ?3)
         "#,
     )
     .bind(kind)
     .bind(config_json)
+    .bind(note)
     .execute(pool)
     .await?;
 
     Ok(res.last_insert_rowid())
 }
 
-/// Update an endpoint's configuration
-pub async fn update_endpoint(pool: &SqlitePool, id: i64, config_json: &str) -> Result<()> {
+/// Update an endpoint's configuration and note
+pub async fn update_endpoint(pool: &SqlitePool, id: i64, config_json: &str, note: Option<&str>) -> Result<()> {
     sqlx::query(
         r#"
         UPDATE endpoints
-        SET config_json = ?1
-        WHERE id = ?2
+        SET config_json = ?1, note = ?2
+        WHERE id = ?3
         "#,
     )
     .bind(config_json)
+    .bind(note)
     .bind(id)
     .execute(pool)
     .await?;
@@ -353,4 +359,18 @@ pub async fn list_notified_posts_by_subreddit(pool: &SqlitePool, subreddit: &str
     .await?;
 
     Ok(rows)
+}
+
+/// Delete a notified post by ID
+pub async fn delete_notified_post(pool: &SqlitePool, id: i64) -> Result<()> {
+    sqlx::query(
+        r#"
+        DELETE FROM notified_posts WHERE id = ?1
+        "#,
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }

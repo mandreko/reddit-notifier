@@ -34,8 +34,10 @@ impl FormField {
 pub struct ConfigBuilder {
     pub endpoint_type: EndpointKind,
     pub fields: Vec<FormField>,
+    pub note: String,
     pub current_field: usize,
     pub type_selection_mode: bool,
+    pub editing_note: bool,
 }
 
 impl ConfigBuilder {
@@ -43,19 +45,23 @@ impl ConfigBuilder {
         let mut builder = Self {
             endpoint_type: EndpointKind::Discord,
             fields: Vec::new(),
+            note: String::new(),
             current_field: 0,
             type_selection_mode: true,
+            editing_note: false,
         };
         builder.set_type(EndpointKind::Discord);
         builder
     }
 
-    pub fn from_existing(kind: EndpointKind, config_json: &str) -> Result<Self> {
+    pub fn from_existing(kind: EndpointKind, config_json: &str, note: Option<String>) -> Result<Self> {
         let mut builder = Self {
             endpoint_type: kind.clone(),
             fields: Vec::new(),
+            note: note.unwrap_or_default(),
             current_field: 0,
             type_selection_mode: false,
+            editing_note: false,
         };
 
         builder.set_type(kind);
@@ -110,23 +116,41 @@ impl ConfigBuilder {
 
         match key.code {
             KeyCode::Tab => {
-                self.current_field = (self.current_field + 1) % self.fields.len();
+                if self.editing_note {
+                    self.editing_note = false;
+                    self.current_field = 0;
+                } else if self.current_field == self.fields.len() - 1 {
+                    self.editing_note = true;
+                } else {
+                    self.current_field += 1;
+                }
                 Ok(None)
             }
             KeyCode::BackTab => {
-                if self.current_field > 0 {
-                    self.current_field -= 1;
-                } else {
+                if self.editing_note {
+                    self.editing_note = false;
                     self.current_field = self.fields.len() - 1;
+                } else if self.current_field == 0 {
+                    self.editing_note = true;
+                } else {
+                    self.current_field -= 1;
                 }
                 Ok(None)
             }
             KeyCode::Char(c) => {
-                self.fields[self.current_field].value.push(c);
+                if self.editing_note {
+                    self.note.push(c);
+                } else {
+                    self.fields[self.current_field].value.push(c);
+                }
                 Ok(None)
             }
             KeyCode::Backspace => {
-                self.fields[self.current_field].value.pop();
+                if self.editing_note {
+                    self.note.pop();
+                } else {
+                    self.fields[self.current_field].value.pop();
+                }
                 Ok(None)
             }
             KeyCode::Enter => {
@@ -239,6 +263,14 @@ impl ConfigBuilder {
         }
     }
 
+    pub fn get_note(&self) -> Option<&str> {
+        if self.note.is_empty() {
+            None
+        } else {
+            Some(&self.note)
+        }
+    }
+
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         let popup_area = centered_rect(80, 80, area);
 
@@ -307,6 +339,7 @@ impl ConfigBuilder {
     fn render_form(&self, frame: &mut Frame, area: Rect) {
         let chunks = Layout::vertical([
             Constraint::Length(3),
+            Constraint::Length(4), // Note field
             Constraint::Length((self.fields.len() * 3 + 1) as u16),
             Constraint::Length(6),
             Constraint::Min(0),
@@ -327,13 +360,31 @@ impl ConfigBuilder {
                     .style(Style::default().fg(Color::Cyan)),
             );
 
+        // Note field
+        let note_label_style = if self.editing_note {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        let note_cursor = if self.editing_note { "_" } else { "" };
+        let note_widget = Paragraph::new(vec![
+            Line::from(Span::styled("Note (optional):", note_label_style)),
+            Line::from(vec![
+                Span::raw("["),
+                Span::raw(&self.note),
+                Span::raw(note_cursor),
+                Span::raw("]"),
+            ]),
+        ])
+        .block(Block::default().borders(Borders::ALL));
+
         // Form fields
         let field_lines: Vec<Line> = self
             .fields
             .iter()
             .enumerate()
             .flat_map(|(i, field)| {
-                let is_current = i == self.current_field;
+                let is_current = !self.editing_note && i == self.current_field;
                 let label_style = if is_current {
                     Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
                 } else {
@@ -365,7 +416,7 @@ impl ConfigBuilder {
             .collect();
 
         let form = Paragraph::new(field_lines)
-            .block(Block::default().borders(Borders::ALL).title("Fields"));
+            .block(Block::default().borders(Borders::ALL).title("Endpoint Configuration"));
 
         // JSON Preview
         let preview = Paragraph::new(self.preview_json())
@@ -384,9 +435,10 @@ impl ConfigBuilder {
 
         frame.render_widget(Clear, area);
         frame.render_widget(title, chunks[0]);
-        frame.render_widget(form, chunks[1]);
-        frame.render_widget(preview, chunks[2]);
-        frame.render_widget(help, chunks[4]);
+        frame.render_widget(note_widget, chunks[1]);
+        frame.render_widget(form, chunks[2]);
+        frame.render_widget(preview, chunks[3]);
+        frame.render_widget(help, chunks[5]);
     }
 }
 

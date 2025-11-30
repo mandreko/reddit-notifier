@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table},
     Frame,
 };
@@ -22,6 +22,8 @@ pub struct LogsState {
     pub available_subreddits: Vec<String>,
     pub filter_mode: bool,
     pub filter_selected: usize,
+    pub selected_post: usize,
+    pub confirm_delete: Option<i64>, // ID of post to delete
 }
 
 impl LogsState {
@@ -34,6 +36,20 @@ impl LogsState {
             available_subreddits: Vec::new(),
             filter_mode: false,
             filter_selected: 0,
+            selected_post: 0,
+            confirm_delete: None,
+        }
+    }
+
+    pub fn next_post(&mut self) {
+        if !self.posts.is_empty() {
+            self.selected_post = (self.selected_post + 1).min(self.posts.len() - 1);
+        }
+    }
+
+    pub fn prev_post(&mut self) {
+        if self.selected_post > 0 {
+            self.selected_post -= 1;
         }
     }
 
@@ -101,6 +117,11 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_filter_mode(frame, app, area);
     } else {
         render_list_mode(frame, app, area);
+
+        // Show delete confirmation dialog if needed
+        if let Some(post_id) = app.logs_state.confirm_delete {
+            render_confirm_delete(frame, area, post_id);
+        }
     }
 }
 
@@ -145,7 +166,8 @@ fn render_list_mode(frame: &mut Frame, app: &App, area: Rect) {
             .logs_state
             .posts
             .iter()
-            .map(|post| {
+            .enumerate()
+            .map(|(i, post)| {
                 // Format timestamp to be more readable
                 let timestamp_short = post
                     .first_seen_at
@@ -154,24 +176,38 @@ fn render_list_mode(frame: &mut Frame, app: &App, area: Rect) {
                     .unwrap_or(&post.first_seen_at)
                     .replace('T', " ");
 
+                let prefix = if i == app.logs_state.selected_post {
+                    ">"
+                } else {
+                    " "
+                };
+                let style = if i == app.logs_state.selected_post {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
+
                 Row::new(vec![
+                    prefix.to_string(),
                     post.subreddit.clone(),
                     post.post_id.clone(),
                     timestamp_short,
                 ])
+                .style(style)
             })
             .collect();
 
         let table = Table::new(
             rows,
             [
-                Constraint::Min(15),
-                Constraint::Min(10),
-                Constraint::Min(20),
+                Constraint::Length(2),      // Selection marker
+                Constraint::Percentage(25), // Subreddit
+                Constraint::Percentage(30), // Post ID
+                Constraint::Percentage(45), // First Seen timestamp
             ],
         )
         .header(
-            Row::new(vec!["Subreddit", "Post ID", "First Seen"])
+            Row::new(vec!["", "Subreddit", "Post ID", "First Seen"])
                 .style(Style::default().add_modifier(Modifier::BOLD)),
         )
         .block(
@@ -189,13 +225,42 @@ fn render_list_mode(frame: &mut Frame, app: &App, area: Rect) {
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
+        "[↑/↓] Navigate  ".into(),
         "[←/→] Page  ".into(),
+        "[d] Delete  ".into(),
         "[f] Filter  ".into(),
         "[Esc] Back".into(),
     ]))
     .alignment(Alignment::Center)
     .block(Block::default().borders(Borders::ALL));
     frame.render_widget(help, chunks[3]);
+}
+
+fn render_confirm_delete(frame: &mut Frame, area: Rect, post_id: i64) {
+    let popup_area = centered_rect(50, 30, area);
+    let text = format!("Delete log entry #{}?", post_id);
+    let popup = Paragraph::new(vec![
+        Line::from(""),
+        Line::from(text).alignment(Alignment::Center),
+        Line::from("").alignment(Alignment::Center),
+        Line::from(vec![
+            Span::raw("["),
+            Span::styled("y", Style::default().fg(Color::Yellow)),
+            Span::raw("] Yes    ["),
+            Span::styled("n", Style::default().fg(Color::Yellow)),
+            Span::raw("] No"),
+        ])
+        .alignment(Alignment::Center),
+    ])
+    .block(
+        Block::default()
+            .title("Confirm Delete")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::Red)),
+    );
+
+    frame.render_widget(ratatui::widgets::Clear, popup_area);
+    frame.render_widget(popup, popup_area);
 }
 
 fn render_filter_mode(frame: &mut Frame, app: &App, area: Rect) {
@@ -258,7 +323,9 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
-    if app.logs_state.filter_mode {
+    if app.logs_state.confirm_delete.is_some() {
+        handle_confirm_delete_mode(app, key).await
+    } else if app.logs_state.filter_mode {
         handle_filter_mode(app, key).await
     } else {
         handle_list_mode(app, key).await
@@ -267,13 +334,27 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
 
 async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
+        KeyCode::Up => {
+            app.logs_state.prev_post();
+        }
+        KeyCode::Down => {
+            app.logs_state.next_post();
+        }
         KeyCode::Left => {
             app.logs_state.prev_page();
+            app.logs_state.selected_post = 0;
             load_logs(app).await?;
         }
         KeyCode::Right => {
             app.logs_state.next_page();
+            app.logs_state.selected_post = 0;
             load_logs(app).await?;
+        }
+        KeyCode::Char('d') => {
+            if !app.logs_state.posts.is_empty() {
+                let post_id = app.logs_state.posts[app.logs_state.selected_post].id;
+                app.logs_state.confirm_delete = Some(post_id);
+            }
         }
         KeyCode::Char('f') => {
             app.logs_state.filter_mode = true;
@@ -310,6 +391,24 @@ async fn handle_filter_mode(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         KeyCode::Esc => {
             app.logs_state.filter_mode = false;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+async fn handle_confirm_delete_mode(app: &mut App, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            if let Some(post_id) = app.logs_state.confirm_delete {
+                database::delete_notified_post(&app.pool, post_id).await?;
+                app.logs_state.confirm_delete = None;
+                app.logs_state.selected_post = 0;
+                load_logs(app).await?;
+            }
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            app.logs_state.confirm_delete = None;
         }
         _ => {}
     }

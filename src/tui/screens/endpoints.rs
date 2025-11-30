@@ -150,19 +150,15 @@ fn render_list(frame: &mut Frame, app: &App, area: Rect) {
                 let active = if endpoint.active { "✓" } else { "✗" };
                 let kind_str = endpoint.kind.as_str();
 
-                // Truncate config for display
-                let config_preview = if endpoint.config_json.len() > 40 {
-                    format!("{}...", &endpoint.config_json[..40])
-                } else {
-                    endpoint.config_json.clone()
-                };
+                let note_display = endpoint.note.as_deref().unwrap_or("");
 
                 Row::new(vec![
                     prefix.to_string(),
                     endpoint.id.to_string(),
                     kind_str.to_string(),
                     active.to_string(),
-                    config_preview,
+                    note_display.to_string(),
+                    endpoint.config_json.clone(),
                 ])
                 .style(style)
             })
@@ -171,15 +167,16 @@ fn render_list(frame: &mut Frame, app: &App, area: Rect) {
         let table = Table::new(
             rows,
             [
-                Constraint::Length(2),
-                Constraint::Length(5),
-                Constraint::Length(10),
-                Constraint::Length(8),
-                Constraint::Min(20),
+                Constraint::Length(2),      // Selection marker
+                Constraint::Length(5),      // ID
+                Constraint::Length(10),     // Type
+                Constraint::Length(8),      // Active
+                Constraint::Percentage(20), // Note
+                Constraint::Percentage(55), // Config (takes remaining space)
             ],
         )
         .header(
-            Row::new(vec!["", "ID", "Type", "Active", "Config"])
+            Row::new(vec!["", "ID", "Type", "Active", "Note", "Config"])
                 .style(Style::default().add_modifier(Modifier::BOLD)),
         )
         .block(Block::default().borders(Borders::ALL));
@@ -344,7 +341,7 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('e') => {
             if !app.endpoints_state.endpoints.is_empty() {
                 let endpoint = app.endpoints_state.endpoints[app.endpoints_state.selected].clone();
-                match ConfigBuilder::from_existing(endpoint.kind.clone(), &endpoint.config_json) {
+                match ConfigBuilder::from_existing(endpoint.kind.clone(), &endpoint.config_json, endpoint.note.clone()) {
                     Ok(builder) => {
                         app.endpoints_state.mode = EndpointsMode::Editing {
                             endpoint_id: endpoint.id,
@@ -372,11 +369,9 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
             if !app.endpoints_state.endpoints.is_empty() {
                 let endpoint_id = app.endpoints_state.endpoints[app.endpoints_state.selected].id;
                 match database::toggle_endpoint_active(&app.pool, endpoint_id).await {
-                    Ok(new_status) => {
+                    Ok(_new_status) => {
                         load_endpoints(app).await?;
-                        let status_str = if new_status { "active" } else { "inactive" };
-                        app.endpoints_state.success_message =
-                            Some(format!("Endpoint {} is now {}", endpoint_id, status_str));
+                        // Silently update the list - no success message needed
                     }
                     Err(e) => {
                         app.endpoints_state.error_message =
@@ -407,11 +402,10 @@ async fn handle_creating_mode(app: &mut App, key: KeyEvent, builder: &ConfigBuil
             match new_builder.build_json() {
                 Ok(json) => {
                     let kind_str = new_builder.endpoint_type.as_str();
-                    match database::create_endpoint(&app.pool, kind_str, &json).await {
+                    let note = new_builder.get_note();
+                    match database::create_endpoint(&app.pool, kind_str, &json, note).await {
                         Ok(_) => {
                             load_endpoints(app).await?;
-                            app.endpoints_state.success_message =
-                                Some(format!("Created {} endpoint", kind_str));
                             app.endpoints_state.mode = EndpointsMode::List;
                         }
                         Err(e) => {
@@ -450,11 +444,10 @@ async fn handle_editing_mode(
         Some(ConfigAction::Save) => {
             match new_builder.build_json() {
                 Ok(json) => {
-                    match database::update_endpoint(&app.pool, endpoint_id, &json).await {
+                    let note = new_builder.get_note();
+                    match database::update_endpoint(&app.pool, endpoint_id, &json, note).await {
                         Ok(_) => {
                             load_endpoints(app).await?;
-                            app.endpoints_state.success_message =
-                                Some(format!("Updated endpoint {}", endpoint_id));
                             app.endpoints_state.mode = EndpointsMode::List;
                         }
                         Err(e) => {
@@ -493,15 +486,13 @@ async fn handle_confirm_delete_mode(
     app: &mut App,
     key: KeyEvent,
     endpoint_id: i64,
-    endpoint_desc: &str,
+    _endpoint_desc: &str,
 ) -> Result<()> {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
             match database::delete_endpoint(&app.pool, endpoint_id).await {
                 Ok(_) => {
                     load_endpoints(app).await?;
-                    app.endpoints_state.success_message =
-                        Some(format!("Deleted endpoint '{}'", endpoint_desc));
                     app.endpoints_state.mode = EndpointsMode::List;
                 }
                 Err(e) => {

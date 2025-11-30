@@ -59,6 +59,7 @@ pub struct EndpointRow {
     pub config_json: String,
     #[allow(dead_code)]
     pub active: bool,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone)]

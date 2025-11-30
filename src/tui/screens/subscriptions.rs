@@ -167,10 +167,10 @@ fn render_list(frame: &mut Frame, app: &App, area: Rect) {
         let table = Table::new(
             rows,
             [
-                Constraint::Length(2),
-                Constraint::Length(5),
-                Constraint::Min(20),
-                Constraint::Length(12),
+                Constraint::Length(2),      // Selection marker
+                Constraint::Length(5),      // ID
+                Constraint::Percentage(60), // Subreddit (takes most space)
+                Constraint::Percentage(40), // Created timestamp
             ],
         )
         .header(
@@ -515,8 +515,6 @@ async fn handle_creating_mode(app: &mut App, key: KeyEvent, input: &str) -> Resu
                 match database::create_subscription(&app.pool, &new_input).await {
                     Ok(_) => {
                         load_subscriptions(app).await?;
-                        app.subscriptions_state.success_message =
-                            Some(format!("Created subscription '{}'", new_input));
                         app.subscriptions_state.mode = SubscriptionsMode::List;
                     }
                     Err(e) => {
@@ -610,7 +608,6 @@ async fn handle_linking_mode(
                 }
             }
 
-            app.subscriptions_state.success_message = Some("Links updated successfully".to_string());
             app.subscriptions_state.mode = SubscriptionsMode::List;
         }
         KeyCode::Esc => {
@@ -630,15 +627,13 @@ async fn handle_confirm_delete_mode(
     app: &mut App,
     key: KeyEvent,
     subscription_id: i64,
-    subreddit_name: &str,
+    _subreddit_name: &str,
 ) -> Result<()> {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
             match database::delete_subscription(&app.pool, subscription_id).await {
                 Ok(_) => {
                     load_subscriptions(app).await?;
-                    app.subscriptions_state.success_message =
-                        Some(format!("Deleted subscription '{}'", subreddit_name));
                     app.subscriptions_state.mode = SubscriptionsMode::List;
                 }
                 Err(e) => {
