@@ -28,6 +28,7 @@ LABEL authors="Matt Andreko <mandreko@gmail.com>"
 LABEL org.opencontainers.image.source=https://github.com/mandreko/reddit-notifier
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /app/target/release/reddit-notifier /app/
+COPY --from=builder /app/target/release/reddit-notifier-tui /app/
 USER 65534
 VOLUME /data
 CMD ["/app/reddit-notifier"]
