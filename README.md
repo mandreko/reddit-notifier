@@ -43,7 +43,6 @@ REDDIT_USER_AGENT=reddit_notifier/1.0 (by u/yourusername)
 ```
 💡 Reddit requires a User-Agent that clearly identifies your app and your Reddit username.
 
-
 ### 3.️ Database
 
 Apply migrations
@@ -108,6 +107,35 @@ docker run --rm \
   ghcr.io/mandreko/reddit-notifier:latest
 ```
 
+# 🐳 Docker-Compose Option
+
+Create a docker-compose.yml file:
+```bash
+  services:
+    reddit-notifier:
+      image: ghcr.io/mandreko/reddit-notifier:latest
+      volumes:
+        - ./data:/data
+      restart: unless-stopped
+
+    reddit-notifier-tui:
+      image: ghcr.io/mandreko/reddit-notifier:latest
+      command: /app/reddit-notifier-tui
+      volumes:
+        - ./data:/data
+      stdin_open: true
+      tty: true
+      profiles: ["tui"]
+```
+
+The main daemon notifier service will then run automatically, while making the tui front-end run only on-demand:
+  
+Example Usage:
+```bash
+  docker compose up -d                    # Run daemon
+  docker compose run --rm reddit-notifier-tui  # Run TUI
+```
+
 # 📝 License
 
 GPLv3 License © Matt Andreko
@@ -115,4 +143,3 @@ GPLv3 License © Matt Andreko
 # 🙋 Contributing
 
 Pull requests are welcome! Feel free to open issues or suggest improvements.
-
