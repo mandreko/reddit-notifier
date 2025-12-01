@@ -31,4 +31,8 @@ COPY --from=builder /app/target/release/reddit-notifier /app/
 COPY --from=builder /app/target/release/reddit-notifier-tui /app/
 USER 65534
 VOLUME /data
+# Set default ENV values, which user can over-ride 
+ENV DATABASE_URL=sqlite:///data/reddit-notifier.db
+ENV POLL_INTERVAL_SECS=60
+ENV REDDIT_USER_AGENT="reddit_notifier (https://github.com/mandreko/reddit-notifier)"
 CMD ["/app/reddit-notifier"]
