@@ -99,4 +99,6 @@ http-client.private.env.json
 /.env
 
 # Database files
+data/
 data.db*
+reddit-notifier.db*
