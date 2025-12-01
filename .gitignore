@@ -95,6 +95,9 @@ http-client.private.env.json
 .idea/.cache/.Apifox_Helper
 .idea/ApifoxUploaderProjectSetting.xml
 
+# VS Code settings folder
+.vscode
+
 # Env files, outside of the .env.example
 /.env
 
