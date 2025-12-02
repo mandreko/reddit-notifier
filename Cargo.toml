@@ -37,3 +37,29 @@ path = "src/bin/reddit-notifier-tui.rs"
 [[bin]]
 name = "healthcheck"
 path = "src/bin/healthcheck.rs"
+
+
+[package.metadata.release]
+# Don't publish to crates.io (since this is primarily a Docker application)
+publish = false
+# Create and push a git tag
+tag = true
+# Push changes to remote
+push = true
+# Sign the git tag (using SSH signing key)
+sign-tag = true
+# Don't run `cargo package` since we're not publishing to crates.io
+verify = false
+# Automatically push the git tag
+push-options = ["--follow-tags"]
+# Update dependencies in Cargo.lock
+dev-version-ext = "dev"
+# Pre-release replacements - update version references in files
+pre-release-replacements = [
+  {file="README.md", search="reddit-notifier:latest", replace="reddit-notifier:{{version}}", exactly=1},
+  {file="README.md", search="reddit-notifier:{{version}}", replace="reddit-notifier:{{version}}", exactly=2, prerelease=true},
+]
+# Create a release commit message
+pre-release-commit-message = "chore: Release {{crate_name}} version {{version}}"
+# Post-release commit message
+post-release-commit-message = "chore: Start next development iteration {{next_version}}"

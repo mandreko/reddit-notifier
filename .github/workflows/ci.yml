@@ -1,4 +1,4 @@
-name: Build and Push Docker image
+name: CI
 
 on:
   push:
@@ -24,16 +24,44 @@ jobs:
       - run: cargo check
       - run: cargo clippy
 
-  build:
+  determine-push:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    outputs:
+      # should-push: Whether to push the built image to the registry
+      #   - true: Push to registry (main branch, same-repo PRs)
+      #   - false: Build only, don't push (fork PRs)
+      should-push: ${{ steps.should-push.outputs.push }}
+
+      # should-skip: Whether to skip the entire build job
+      #   - true: Don't build at all (commit has release tag, will be built by release.yml)
+      #   - false: Proceed with build
+      #
+      # Note: should-skip and should-push are NOT opposites!
+      #   - should-skip=false, should-push=false: Build but don't push (fork PR)
+      #   - should-skip=false, should-push=true: Build and push (normal CI)
+      #   - should-skip=true: Skip entirely to avoid duplicate builds on releases
+      should-skip: ${{ steps.check-release-tag.outputs.skip }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check if commit has release tag
+        id: check-release-tag
+        run: |
+          # Check if current commit has a version tag (v*.*.*)
+          # This prevents double-building when cargo-release pushes both:
+          #   1. A commit to main (would trigger this workflow)
+          #   2. A version tag (triggers release.yml workflow)
+          # We skip here and let release.yml handle the build with proper semver tags
+          if git tag --points-at HEAD | grep -q '^v[0-9]\+\.[0-9]\+\.[0-9]\+$'; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Skipping build - commit has release tag, will be built by release workflow"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Determine if we should push
         id: should-push
@@ -42,41 +70,29 @@ jobs:
           PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           CURRENT_REPO: ${{ github.repository }}
         run: |
+          # Security: Only push images for:
+          #   - Direct pushes to branches (not PRs)
+          #   - PRs from the same repository (not forks)
+          # This prevents malicious fork PRs from pushing images to our registry
           if [[ "$EVENT_NAME" != "pull_request" ]] || [[ "$PR_HEAD_REPO" == "$CURRENT_REPO" ]]; then
             echo "push=true" >> $GITHUB_OUTPUT
           else
             echo "push=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
-
-      - name: Log in to GitHub Container Registry
-        if: steps.should-push.outputs.push == 'true'
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha
-
-      - name: Build and push
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
-        with:
-          push: ${{ steps.should-push.outputs.push }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+  build:
+    needs: determine-push
+    if: needs.determine-push.outputs.should-skip != 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/_docker-build-push.yml
+    with:
+      push: ${{ needs.determine-push.outputs.should-push == 'true' }}
+      tags-input: |
+        type=ref,event=branch
+        type=ref,event=pr
+        type=semver,pattern={{version}}
+        type=semver,pattern={{major}}.{{minor}}
+        type=raw,value=latest,enable={{is_default_branch}}
+        type=sha
