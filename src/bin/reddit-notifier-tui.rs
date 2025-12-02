@@ -2,7 +2,7 @@ use anyhow::Result;
 use dotenvy::dotenv;
 use reddit_notifier::models::AppConfig;
 use reddit_notifier::tui::App;
-use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
+use sqlx::sqlite::SqliteConnectOptions;
 use std::str::FromStr;
 
 #[tokio::main]
@@ -27,7 +27,12 @@ async fn main() -> Result<()> {
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .busy_timeout(std::time::Duration::from_secs(5));
 
-    let pool = SqlitePool::connect_with(connect_options).await?;
+    // Configure pool for SQLite (low max_connections to reduce contention)
+    let pool = sqlx::pool::PoolOptions::new()
+        .max_connections(3)
+        .idle_timeout(std::time::Duration::from_secs(300))
+        .connect_with(connect_options)
+        .await?;
 
     // Run migrations
     sqlx::migrate!().run(&pool).await?;

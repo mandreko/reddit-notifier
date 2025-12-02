@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use dotenvy::dotenv;
 use reqwest::Client;
-use sqlx::{sqlite::SqliteConnectOptions, SqlitePool, Sqlite};
+use sqlx::{sqlite::SqliteConnectOptions, Sqlite};
 use sqlx::migrate::MigrateDatabase;
 use std::str::FromStr;
 use tracing::info;
@@ -34,7 +34,11 @@ async fn main() -> Result<()> {
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .busy_timeout(std::time::Duration::from_secs(5));
 
-    let pool = SqlitePool::connect_with(connect_options)
+    // Configure pool for SQLite (low max_connections to reduce contention)
+    let pool = sqlx::pool::PoolOptions::new()
+        .max_connections(5)
+        .idle_timeout(std::time::Duration::from_secs(300))
+        .connect_with(connect_options)
         .await
         .with_context(|| format!("failed to connect to {}", cfg.database_url))?;
 
