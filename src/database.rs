@@ -44,9 +44,9 @@ pub async fn endpoints_for_subreddit(pool: &SqlitePool, subreddit: &str) -> Resu
         let kind_str = row.get::<String, _>("kind");
 
         // Try to parse the kind - if it fails, log a warning and skip this endpoint
-        let kind = match EndpointKind::from_str(&kind_str) {
-            Some(k) => k,
-            None => {
+        let kind = match kind_str.parse::<EndpointKind>() {
+            Ok(k) => k,
+            Err(_) => {
                 tracing::warn!("Invalid endpoint kind '{}' for endpoint id {} - skipping", kind_str, id);
                 continue; // Skip this endpoint
             }
@@ -163,9 +163,9 @@ pub async fn get_subscription_endpoints(pool: &SqlitePool, subscription_id: i64)
         let kind_str = row.get::<String, _>("kind");
 
         // Try to parse the kind - if it fails, log a warning and skip this endpoint
-        let kind = match EndpointKind::from_str(&kind_str) {
-            Some(k) => k,
-            None => {
+        let kind = match kind_str.parse::<EndpointKind>() {
+            Ok(k) => k,
+            Err(_) => {
                 tracing::warn!("Invalid endpoint kind '{}' for endpoint id {} - skipping", kind_str, id);
                 continue; // Skip this endpoint
             }
@@ -204,9 +204,9 @@ pub async fn list_endpoints(pool: &SqlitePool) -> Result<Vec<EndpointRow>> {
         let kind_str = row.get::<String, _>("kind");
 
         // Try to parse the kind - if it fails, log a warning and skip this endpoint
-        let kind = match EndpointKind::from_str(&kind_str) {
-            Some(k) => k,
-            None => {
+        let kind = match kind_str.parse::<EndpointKind>() {
+            Ok(k) => k,
+            Err(_) => {
                 tracing::warn!("Invalid endpoint kind '{}' for endpoint id {} - skipping", kind_str, id);
                 continue; // Skip this endpoint
             }
@@ -242,16 +242,9 @@ pub async fn get_endpoint(pool: &SqlitePool, id: i64) -> Result<EndpointRow> {
     let kind_str = row.get::<String, _>("kind");
 
     // Try to parse the kind - return an error if it's invalid (for single item, we can't skip)
-    let kind = match EndpointKind::from_str(&kind_str) {
-        Some(k) => k,
-        None => {
-            return Err(anyhow::anyhow!(
-                "Invalid endpoint kind '{}' for endpoint id {}",
-                kind_str,
-                endpoint_id
-            ));
-        }
-    };
+    let kind = kind_str
+        .parse::<EndpointKind>()
+        .map_err(|_| anyhow::anyhow!("Invalid endpoint kind '{}' for endpoint id {}", kind_str, endpoint_id))?;
 
     Ok(EndpointRow {
         id: endpoint_id,
