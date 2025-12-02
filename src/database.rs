@@ -247,10 +247,13 @@ pub async fn delete_endpoint(pool: &SqlitePool, id: i64) -> Result<()> {
 
 /// Toggle an endpoint's active status, returns new status
 pub async fn toggle_endpoint_active(pool: &SqlitePool, id: i64) -> Result<bool> {
-    // Get current status
-    let current = sqlx::query(
+    // Atomically toggle using SQL (1 - active flips 0->1 and 1->0)
+    let row = sqlx::query(
         r#"
-        SELECT active FROM endpoints WHERE id = ?1
+        UPDATE endpoints
+        SET active = 1 - active
+        WHERE id = ?1
+        RETURNING active
         "#,
     )
     .bind(id)
@@ -258,21 +261,7 @@ pub async fn toggle_endpoint_active(pool: &SqlitePool, id: i64) -> Result<bool> 
     .fetch_one(pool)
     .await?;
 
-    // Toggle it
-    let new_status = !current;
-    sqlx::query(
-        r#"
-        UPDATE endpoints
-        SET active = ?1
-        WHERE id = ?2
-        "#,
-    )
-    .bind(new_status as i64)
-    .bind(id)
-    .execute(pool)
-    .await?;
-
-    Ok(new_status)
+    Ok(row)
 }
 
 // --- Junction Table Management ---
