@@ -24,7 +24,8 @@ async fn main() -> Result<()> {
     // Connect to database
     let connect_options = SqliteConnectOptions::from_str(&cfg.database_url)?
         .create_if_missing(true)
-        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        .busy_timeout(std::time::Duration::from_secs(5));
 
     let pool = SqlitePool::connect_with(connect_options).await?;
 
