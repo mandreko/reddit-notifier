@@ -37,8 +37,12 @@ jobs:
 
       - name: Determine if we should push
         id: should-push
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          CURRENT_REPO: ${{ github.repository }}
         run: |
-          if [[ "${{ github.event_name }}" != "pull_request" ]] || [[ "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]; then
+          if [[ "$EVENT_NAME" != "pull_request" ]] || [[ "$PR_HEAD_REPO" == "$CURRENT_REPO" ]]; then
             echo "push=true" >> $GITHUB_OUTPUT
           else
             echo "push=false" >> $GITHUB_OUTPUT
