@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - 'main'
+  pull_request:
+    branches:
+      - '*'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check-code:
+    permissions:
+      contents: read
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+      - run: cargo check
+      - run: cargo clippy
+
+  determine-push:
+    runs-on: ubuntu-latest
+    outputs:
+      # should-push: Whether to push the built image to the registry
+      #   - true: Push to registry (main branch, same-repo PRs)
+      #   - false: Build only, don't push (fork PRs)
+      should-push: ${{ steps.should-push.outputs.push }}
+
+      # should-skip: Whether to skip the entire build job
+      #   - true: Don't build at all (commit has release tag, will be built by release.yml)
+      #   - false: Proceed with build
+      #
+      # Note: should-skip and should-push are NOT opposites!
+      #   - should-skip=false, should-push=false: Build but don't push (fork PR)
+      #   - should-skip=false, should-push=true: Build and push (normal CI)
+      #   - should-skip=true: Skip entirely to avoid duplicate builds on releases
+      should-skip: ${{ steps.check-release-tag.outputs.skip }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check if commit has release tag
+        id: check-release-tag
+        run: |
+          # Check if current commit has a version tag (v*.*.*)
+          # This prevents double-building when cargo-release pushes both:
+          #   1. A commit to main (would trigger this workflow)
+          #   2. A version tag (triggers release.yml workflow)
+          # We skip here and let release.yml handle the build with proper semver tags
+          if git tag --points-at HEAD | grep -q '^v[0-9]\+\.[0-9]\+\.[0-9]\+$'; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Skipping build - commit has release tag, will be built by release workflow"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine if we should push
+        id: should-push
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          CURRENT_REPO: ${{ github.repository }}
+        run: |
+          # Security: Only push images for:
+          #   - Direct pushes to branches (not PRs)
+          #   - PRs from the same repository (not forks)
+          # This prevents malicious fork PRs from pushing images to our registry
+          if [[ "$EVENT_NAME" != "pull_request" ]] || [[ "$PR_HEAD_REPO" == "$CURRENT_REPO" ]]; then
+            echo "push=true" >> $GITHUB_OUTPUT
+          else
+            echo "push=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: determine-push
+    if: needs.determine-push.outputs.should-skip != 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/_docker-build-push.yml
+    with:
+      push: ${{ needs.determine-push.outputs.should-push == 'true' }}
+      tags-input: |
+        type=ref,event=branch
+        type=ref,event=pr
+        type=semver,pattern={{version}}
+        type=semver,pattern={{major}}.{{minor}}
+        type=raw,value=latest,enable={{is_default_branch}}
+        type=sha
