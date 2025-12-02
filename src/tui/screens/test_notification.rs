@@ -27,6 +27,12 @@ pub struct TestNotificationState {
     pub status: TestStatus,
 }
 
+impl Default for TestNotificationState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestNotificationState {
     pub fn new() -> Self {
         Self {

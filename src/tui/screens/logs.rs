@@ -24,6 +24,15 @@ pub struct LogsState {
     pub filter_selected: usize,
     pub selected_post: usize,
     pub confirm_delete: Option<i64>, // ID of post to delete
+    pub truncate_mode: bool,
+    pub truncate_days_input: String,
+    pub truncate_result: Option<String>, // Result message after truncate
+}
+
+impl Default for LogsState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LogsState {
@@ -38,6 +47,9 @@ impl LogsState {
             filter_selected: 0,
             selected_post: 0,
             confirm_delete: None,
+            truncate_mode: false,
+            truncate_days_input: "7".to_string(), // Default to 7 days
+            truncate_result: None,
         }
     }
 
@@ -121,6 +133,11 @@ pub fn render(frame: &mut Frame, app: &App) {
         // Show delete confirmation dialog if needed
         if let Some(post_id) = app.logs_state.confirm_delete {
             render_confirm_delete(frame, area, post_id);
+        }
+
+        // Show truncate dialog if needed
+        if app.logs_state.truncate_mode {
+            render_truncate_dialog(frame, app, area);
         }
     }
 }
@@ -228,12 +245,63 @@ fn render_list_mode(frame: &mut Frame, app: &App, area: Rect) {
         "[↑/↓] Navigate  ".into(),
         "[←/→] Page  ".into(),
         "[d] Delete  ".into(),
+        "[t] Truncate  ".into(),
         "[f] Filter  ".into(),
         "[Esc] Back".into(),
     ]))
     .alignment(Alignment::Center)
     .block(Block::default().borders(Borders::ALL));
     frame.render_widget(help, chunks[3]);
+}
+
+fn render_truncate_dialog(frame: &mut Frame, app: &App, area: Rect) {
+    let popup_area = centered_rect(60, 40, area);
+
+    let result_text = if let Some(ref result) = app.logs_state.truncate_result {
+        vec![
+            Line::from(""),
+            Line::from(result.clone()).alignment(Alignment::Center).style(Style::default().fg(Color::Green)),
+            Line::from(""),
+            Line::from("Press any key to close").alignment(Alignment::Center).style(Style::default().fg(Color::Gray)),
+        ]
+    } else {
+        vec![
+            Line::from(""),
+            Line::from("Delete posts older than N days").alignment(Alignment::Center),
+            Line::from("").alignment(Alignment::Center),
+            Line::from(vec![
+                Span::raw("Days to keep: "),
+                Span::styled(
+                    app.logs_state.truncate_days_input.as_str(),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                ),
+                Span::styled("█", Style::default().fg(Color::Yellow)),
+            ])
+            .alignment(Alignment::Center),
+            Line::from(""),
+            Line::from("Note: Only notifies on posts within 24 hours").alignment(Alignment::Center).style(Style::default().fg(Color::Gray)),
+            Line::from("so older records won't trigger duplicates").alignment(Alignment::Center).style(Style::default().fg(Color::Gray)),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("[Enter]", Style::default().fg(Color::Yellow)),
+                Span::raw(" Truncate  "),
+                Span::styled("[Esc]", Style::default().fg(Color::Yellow)),
+                Span::raw(" Cancel"),
+            ])
+            .alignment(Alignment::Center),
+        ]
+    };
+
+    let popup = Paragraph::new(result_text)
+        .block(
+            Block::default()
+                .title("Truncate Old Posts")
+                .borders(Borders::ALL)
+                .style(Style::default().fg(Color::Cyan)),
+        );
+
+    frame.render_widget(ratatui::widgets::Clear, popup_area);
+    frame.render_widget(popup, popup_area);
 }
 
 fn render_confirm_delete(frame: &mut Frame, area: Rect, post_id: i64) {
@@ -323,7 +391,9 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
-    if app.logs_state.confirm_delete.is_some() {
+    if app.logs_state.truncate_mode {
+        handle_truncate_mode(app, key).await
+    } else if app.logs_state.confirm_delete.is_some() {
         handle_confirm_delete_mode(app, key).await
     } else if app.logs_state.filter_mode {
         handle_filter_mode(app, key).await
@@ -359,8 +429,62 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('f') => {
             app.logs_state.filter_mode = true;
         }
+        KeyCode::Char('t') => {
+            app.logs_state.truncate_mode = true;
+            app.logs_state.truncate_result = None;
+        }
         KeyCode::Esc => {
             app.current_screen = Screen::MainMenu;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+async fn handle_truncate_mode(app: &mut App, key: KeyEvent) -> Result<()> {
+    // If showing result, any key closes the dialog
+    if app.logs_state.truncate_result.is_some() {
+        app.logs_state.truncate_mode = false;
+        app.logs_state.truncate_result = None;
+        app.logs_state.current_page = 0;
+        load_logs(app).await?;
+        return Ok(());
+    }
+
+    match key.code {
+        KeyCode::Char(c) if c.is_ascii_digit() => {
+            // Allow max 3 digits (up to 999 days)
+            if app.logs_state.truncate_days_input.len() < 3 {
+                app.logs_state.truncate_days_input.push(c);
+            }
+        }
+        KeyCode::Backspace => {
+            app.logs_state.truncate_days_input.pop();
+        }
+        KeyCode::Enter => {
+            // Parse and execute truncate
+            if let Ok(days) = app.logs_state.truncate_days_input.parse::<i64>() {
+                if days > 0 {
+                    match database::cleanup_old_posts(&app.pool, days).await {
+                        Ok(deleted) => {
+                            let msg = format!("Deleted {} post(s) older than {} day(s)", deleted, days);
+                            app.logs_state.truncate_result = Some(msg);
+                        }
+                        Err(e) => {
+                            let msg = format!("Error: {}", e);
+                            app.logs_state.truncate_result = Some(msg);
+                        }
+                    }
+                } else {
+                    app.logs_state.truncate_result = Some("Days must be greater than 0".to_string());
+                }
+            } else {
+                app.logs_state.truncate_result = Some("Invalid number".to_string());
+            }
+        }
+        KeyCode::Esc => {
+            app.logs_state.truncate_mode = false;
+            app.logs_state.truncate_days_input = "7".to_string(); // Reset to default
         }
         _ => {}
     }
