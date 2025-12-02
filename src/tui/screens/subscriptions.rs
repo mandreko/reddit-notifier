@@ -40,6 +40,12 @@ pub struct SubscriptionsState {
     pub success_message: Option<String>,
 }
 
+impl Default for SubscriptionsState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SubscriptionsState {
     pub fn new() -> Self {
         Self {

@@ -29,6 +29,12 @@ pub struct LogsState {
     pub truncate_result: Option<String>, // Result message after truncate
 }
 
+impl Default for LogsState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LogsState {
     pub fn new() -> Self {
         Self {

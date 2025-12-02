@@ -40,6 +40,12 @@ pub struct ConfigBuilder {
     pub editing_note: bool,
 }
 
+impl Default for ConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConfigBuilder {
     pub fn new() -> Self {
         let mut builder = Self {
