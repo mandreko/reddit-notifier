@@ -155,6 +155,40 @@ Example Usage:
   docker compose up -d                    # Run daemon
   docker compose run --rm reddit-notifier-tui  # Run TUI
 ```
+=======
+## 🏥 Docker Healthcheck
+
+The container includes a built-in healthcheck that validates the database is functional:
+
+- **Check Interval:** Every 30 seconds
+- **Timeout:** 5 seconds
+- **Start Period:** 10 seconds (grace period for initial setup)
+- **Retries:** 3 failed checks before marking unhealthy
+
+The healthcheck uses a dedicated Rust binary (~3.2MB stripped) that:
+- ✅ Reads `DATABASE_URL` environment variable (same as the app)
+- ✅ Connects to the SQLite database in read-only mode
+- ✅ Executes `SELECT COUNT(*) FROM subscriptions` to verify schema exists
+- ✅ Validates the exact database the application is using
+- ✅ Works in scratch container without shell or additional utilities
+
+**Monitor health status:**
+```bash
+docker ps                           # Check STATUS column
+docker inspect --format='{{.State.Health.Status}}' <container_id>
+docker inspect <container_id> | jq '.[0].State.Health'
+```
+
+**Health states:**
+- `starting` - Container is starting up (within start-period)
+- `healthy` - Database exists, is readable, and has valid schema
+- `unhealthy` - Database missing, locked, corrupted, or missing schema
+
+**Healthcheck validates:**
+- Database file exists and is accessible
+- SQLite can open the database
+- Schema is initialized (subscriptions table exists)
+- Database is not corrupted or locked
 
 ---
 
