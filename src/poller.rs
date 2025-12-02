@@ -33,7 +33,14 @@ pub async fn poll_subreddit_loop(
                         }
                     };
 
-                    let endpoints = endpoints_for_subreddit(&pool, &subreddit).await?;
+                    let endpoints = match endpoints_for_subreddit(&pool, &subreddit).await {
+                        Ok(eps) => eps,
+                        Err(e) => {
+                            error!("Failed to fetch endpoints for r/{}: {} - will retry next iteration", subreddit, e);
+                            tokio::time::sleep(Duration::from_secs(poll_interval_secs)).await;
+                            continue;
+                        }
+                    };
                     let mut unique_endpoint_ids = HashSet::new();
                     let endpoints: Vec<_> = endpoints.into_iter().filter(|e| unique_endpoint_ids.insert(e.id)).collect();
 
@@ -50,7 +57,13 @@ pub async fn poll_subreddit_loop(
                             continue;
                         }
 
-                        let is_new = record_if_new(&pool, &subreddit, &post.id).await?;
+                        let is_new = match record_if_new(&pool, &subreddit, &post.id).await {
+                            Ok(new) => new,
+                            Err(e) => {
+                                error!("Failed to record post {} for r/{}: {} - skipping this post", post.id, subreddit, e);
+                                continue;
+                            }
+                        };
                         if !is_new {
                             info!("Skipping post {} - already seen", post.id);
                             continue;

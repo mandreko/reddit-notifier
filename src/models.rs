@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_with::{serde_as, TimestampSecondsWithFrac};
+use std::str::FromStr;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -43,11 +44,16 @@ impl EndpointKind {
             Self::Pushover => "pushover",
         }
     }
-    pub fn from_str(s: &str) -> Option<Self> {
+}
+
+impl FromStr for EndpointKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "discord" => Some(Self::Discord),
-            "pushover" => Some(Self::Pushover),
-            _ => None,
+            "discord" => Ok(Self::Discord),
+            "pushover" => Ok(Self::Pushover),
+            _ => Err(format!("Unknown endpoint kind: {}", s)),
         }
     }
 }

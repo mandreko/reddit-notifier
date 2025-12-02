@@ -38,6 +38,12 @@ pub struct EndpointsState {
     pub success_message: Option<String>,
 }
 
+impl Default for EndpointsState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EndpointsState {
     pub fn new() -> Self {
         Self {
