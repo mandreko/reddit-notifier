@@ -33,3 +33,7 @@ path = "src/bin/reddit-notifier.rs"
 [[bin]]
 name = "reddit-notifier-tui"
 path = "src/bin/reddit-notifier-tui.rs"
+
+[[bin]]
+name = "healthcheck"
+path = "src/bin/healthcheck.rs"
