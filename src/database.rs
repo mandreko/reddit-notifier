@@ -34,17 +34,34 @@ pub async fn endpoints_for_subreddit(pool: &SqlitePool, subreddit: &str) -> Resu
         "#,
     )
     .bind(subreddit)
-    .map(|row: SqliteRow| EndpointRow {
-        id: row.get::<i64, _>("id"),
-        kind: EndpointKind::from_str(row.get::<String, _>("kind").as_str()).unwrap(),
-        config_json: row.get::<String, _>("config_json"),
-        active: row.get::<i64, _>("active") != 0,
-        note: row.get::<Option<String>, _>("note"),
-    })
     .fetch_all(pool)
     .await?;
 
-    Ok(rows)
+    // Parse each row and skip any with invalid endpoint kinds
+    let mut endpoints = Vec::new();
+    for row in rows {
+        let id = row.get::<i64, _>("id");
+        let kind_str = row.get::<String, _>("kind");
+
+        // Try to parse the kind - if it fails, log a warning and skip this endpoint
+        let kind = match EndpointKind::from_str(&kind_str) {
+            Some(k) => k,
+            None => {
+                tracing::warn!("Invalid endpoint kind '{}' for endpoint id {} - skipping", kind_str, id);
+                continue; // Skip this endpoint
+            }
+        };
+
+        endpoints.push(EndpointRow {
+            id,
+            kind,
+            config_json: row.get::<String, _>("config_json"),
+            active: row.get::<i64, _>("active") != 0,
+            note: row.get::<Option<String>, _>("note"),
+        });
+    }
+
+    Ok(endpoints)
 }
 
 /// Returns true if the (subreddit, post_id) was newly inserted.
@@ -136,17 +153,34 @@ pub async fn get_subscription_endpoints(pool: &SqlitePool, subscription_id: i64)
         "#,
     )
     .bind(subscription_id)
-    .map(|row: SqliteRow| EndpointRow {
-        id: row.get::<i64, _>("id"),
-        kind: EndpointKind::from_str(row.get::<String, _>("kind").as_str()).unwrap(),
-        config_json: row.get::<String, _>("config_json"),
-        active: row.get::<i64, _>("active") != 0,
-        note: row.get::<Option<String>, _>("note"),
-    })
     .fetch_all(pool)
     .await?;
 
-    Ok(rows)
+    // Parse each row and skip any with invalid endpoint kinds
+    let mut endpoints = Vec::new();
+    for row in rows {
+        let id = row.get::<i64, _>("id");
+        let kind_str = row.get::<String, _>("kind");
+
+        // Try to parse the kind - if it fails, log a warning and skip this endpoint
+        let kind = match EndpointKind::from_str(&kind_str) {
+            Some(k) => k,
+            None => {
+                tracing::warn!("Invalid endpoint kind '{}' for endpoint id {} - skipping", kind_str, id);
+                continue; // Skip this endpoint
+            }
+        };
+
+        endpoints.push(EndpointRow {
+            id,
+            kind,
+            config_json: row.get::<String, _>("config_json"),
+            active: row.get::<i64, _>("active") != 0,
+            note: row.get::<Option<String>, _>("note"),
+        });
+    }
+
+    Ok(endpoints)
 }
 
 // --- Endpoints CRUD ---
@@ -160,17 +194,34 @@ pub async fn list_endpoints(pool: &SqlitePool) -> Result<Vec<EndpointRow>> {
         ORDER BY id
         "#,
     )
-    .map(|row: SqliteRow| EndpointRow {
-        id: row.get::<i64, _>("id"),
-        kind: EndpointKind::from_str(row.get::<String, _>("kind").as_str()).unwrap(),
-        config_json: row.get::<String, _>("config_json"),
-        active: row.get::<i64, _>("active") != 0,
-        note: row.get::<Option<String>, _>("note"),
-    })
     .fetch_all(pool)
     .await?;
 
-    Ok(rows)
+    // Parse each row and skip any with invalid endpoint kinds
+    let mut endpoints = Vec::new();
+    for row in rows {
+        let id = row.get::<i64, _>("id");
+        let kind_str = row.get::<String, _>("kind");
+
+        // Try to parse the kind - if it fails, log a warning and skip this endpoint
+        let kind = match EndpointKind::from_str(&kind_str) {
+            Some(k) => k,
+            None => {
+                tracing::warn!("Invalid endpoint kind '{}' for endpoint id {} - skipping", kind_str, id);
+                continue; // Skip this endpoint
+            }
+        };
+
+        endpoints.push(EndpointRow {
+            id,
+            kind,
+            config_json: row.get::<String, _>("config_json"),
+            active: row.get::<i64, _>("active") != 0,
+            note: row.get::<Option<String>, _>("note"),
+        });
+    }
+
+    Ok(endpoints)
 }
 
 /// Get a single endpoint by ID
@@ -183,17 +234,32 @@ pub async fn get_endpoint(pool: &SqlitePool, id: i64) -> Result<EndpointRow> {
         "#,
     )
     .bind(id)
-    .map(|row: SqliteRow| EndpointRow {
-        id: row.get::<i64, _>("id"),
-        kind: EndpointKind::from_str(row.get::<String, _>("kind").as_str()).unwrap(),
+    .fetch_one(pool)
+    .await?;
+
+    // Extract the fields from the database row
+    let endpoint_id = row.get::<i64, _>("id");
+    let kind_str = row.get::<String, _>("kind");
+
+    // Try to parse the kind - return an error if it's invalid (for single item, we can't skip)
+    let kind = match EndpointKind::from_str(&kind_str) {
+        Some(k) => k,
+        None => {
+            return Err(anyhow::anyhow!(
+                "Invalid endpoint kind '{}' for endpoint id {}",
+                kind_str,
+                endpoint_id
+            ));
+        }
+    };
+
+    Ok(EndpointRow {
+        id: endpoint_id,
+        kind,
         config_json: row.get::<String, _>("config_json"),
         active: row.get::<i64, _>("active") != 0,
         note: row.get::<Option<String>, _>("note"),
     })
-    .fetch_one(pool)
-    .await?;
-
-    Ok(row)
 }
 
 /// Create a new endpoint
