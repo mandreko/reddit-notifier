@@ -50,8 +50,3 @@ sign-tag = true
 verify = false
 # Automatically push the git tag
 push-options = ["--follow-tags"]
-# Pre-release replacements - update version references in files
-pre-release-replacements = [
-  {file="README.md", search="reddit-notifier:latest", replace="reddit-notifier:{{version}}", exactly=1},
-  {file="README.md", search="reddit-notifier:{{version}}", replace="reddit-notifier:{{version}}", exactly=2, prerelease=true},
-]
