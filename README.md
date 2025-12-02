@@ -40,8 +40,28 @@ Copy .env.example to .env and fill in the values:
 DATABASE_URL=sqlite://data.db
 POLL_INTERVAL_SECS=60
 REDDIT_USER_AGENT=reddit_notifier/1.0 (by u/yourusername)
+
+# Optional: Database connection retry configuration
+# DB_MAX_RETRIES=5              # Max connection attempts (default: 5)
+# DB_INITIAL_DELAY_MS=500       # Initial retry delay in ms (default: 500)
+# DB_MAX_DELAY_MS=5000          # Max retry delay in ms (default: 5000)
 ```
-💡 Reddit requires a User-Agent that clearly identifies your app and your Reddit username.
+
+**Required Variables:**
+- `DATABASE_URL` - SQLite database path
+- `REDDIT_USER_AGENT` - User agent string (Reddit requires this to identify your app and username)
+
+**Optional Variables:**
+- `POLL_INTERVAL_SECS` - Seconds between Reddit polls (default: 60)
+- `DB_MAX_RETRIES` - Maximum database connection attempts at startup (default: 5)
+- `DB_INITIAL_DELAY_MS` - Initial delay between retry attempts in milliseconds (default: 500)
+- `DB_MAX_DELAY_MS` - Maximum delay between retry attempts in milliseconds (default: 5000)
+
+**Connection Retry Behavior:**
+The application uses exponential backoff when connecting to the database. This helps handle transient failures in Docker environments like:
+- Database file locked during WAL checkpoint
+- Network filesystem lag (though multi-writer scenarios are not supported - see warning below)
+- Temporary file system issues
 
 ### 3.️ Database
 

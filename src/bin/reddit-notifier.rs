@@ -8,6 +8,7 @@ use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use reddit_notifier::database::unique_subreddits;
+use reddit_notifier::db_connection::{connect_with_retry, ConnectionConfig};
 use reddit_notifier::models::AppConfig;
 use reddit_notifier::poller::poll_subreddit_loop;
 
@@ -35,12 +36,15 @@ async fn main() -> Result<()> {
         .busy_timeout(std::time::Duration::from_secs(5));
 
     // Configure pool for SQLite (low max_connections to reduce contention)
-    let pool = sqlx::pool::PoolOptions::new()
-        .max_connections(5)
-        .idle_timeout(std::time::Duration::from_secs(300))
-        .connect_with(connect_options)
-        .await
-        .with_context(|| format!("failed to connect to {}", cfg.database_url))?;
+    let retry_config = ConnectionConfig::from_env();
+    let pool = connect_with_retry(
+        connect_options,
+        5, // max_connections
+        std::time::Duration::from_secs(300), // idle_timeout
+        Some(retry_config),
+    )
+    .await
+    .with_context(|| format!("failed to connect to {}", cfg.database_url))?;
 
     // Apply migrations at startup
     sqlx::migrate!()

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use dotenvy::dotenv;
+use reddit_notifier::db_connection::{connect_with_retry, ConnectionConfig};
 use reddit_notifier::models::AppConfig;
 use reddit_notifier::tui::App;
 use sqlx::sqlite::SqliteConnectOptions;
@@ -21,18 +22,21 @@ async fn main() -> Result<()> {
     // Load configuration
     let cfg = AppConfig::from_env()?;
 
-    // Connect to database
+    // Connect to database with retry logic
     let connect_options = SqliteConnectOptions::from_str(&cfg.database_url)?
         .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .busy_timeout(std::time::Duration::from_secs(5));
 
     // Configure pool for SQLite (low max_connections to reduce contention)
-    let pool = sqlx::pool::PoolOptions::new()
-        .max_connections(3)
-        .idle_timeout(std::time::Duration::from_secs(300))
-        .connect_with(connect_options)
-        .await?;
+    let retry_config = ConnectionConfig::from_env();
+    let pool = connect_with_retry(
+        connect_options,
+        3, // max_connections (lower for TUI)
+        std::time::Duration::from_secs(300), // idle_timeout
+        Some(retry_config),
+    )
+    .await?;
 
     // Run migrations
     sqlx::migrate!().run(&pool).await?;
