@@ -429,3 +429,105 @@ pub async fn delete_notified_post(pool: &SqlitePool, id: i64) -> Result<()> {
 
     Ok(())
 }
+
+/// Clean up old notified posts, deleting records older than the specified number of days
+///
+/// This prevents unbounded growth of the notified_posts table. Since the application
+/// only notifies on posts within 24 hours of the current time (see poller.rs), we can
+/// safely delete older records without risk of duplicate notifications.
+///
+/// # Arguments
+/// * `pool` - Database connection pool
+/// * `days_to_keep` - Number of days of history to keep (default: 7)
+///
+/// # Returns
+/// Number of records deleted
+pub async fn cleanup_old_posts(pool: &SqlitePool, days_to_keep: i64) -> Result<u64> {
+    let result = sqlx::query(
+        r#"
+        DELETE FROM notified_posts
+        WHERE first_seen_at < datetime('now', '-' || ?1 || ' days')
+        "#,
+    )
+    .bind(days_to_keep)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected())
+}
+
+/// Get statistics about notified posts per subreddit
+///
+/// Useful for monitoring database growth and cleanup effectiveness
+pub async fn get_post_statistics(pool: &SqlitePool) -> Result<Vec<(String, i64)>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT subreddit, COUNT(*) as count
+        FROM notified_posts
+        GROUP BY subreddit
+        ORDER BY count DESC
+        "#,
+    )
+    .map(|row: sqlx::sqlite::SqliteRow| {
+        (
+            row.get::<String, _>("subreddit"),
+            row.get::<i64, _>("count"),
+        )
+    })
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_cleanup_old_posts() {
+        // Create an in-memory test database
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+
+        // Insert test data with different ages
+        // Recent posts (within 7 days) - should NOT be deleted
+        for i in 1..=3 {
+            sqlx::query(
+                "INSERT INTO notified_posts (subreddit, post_id, first_seen_at) VALUES (?1, ?2, datetime('now', ?3))",
+            )
+            .bind("testA")
+            .bind(format!("recent_{}", i))
+            .bind(format!("-{} days", i))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // Old posts (older than 7 days) - should be deleted
+        for i in 1..=4 {
+            sqlx::query(
+                "INSERT INTO notified_posts (subreddit, post_id, first_seen_at) VALUES (?1, ?2, datetime('now', ?3))",
+            )
+            .bind("testB")
+            .bind(format!("old_{}", i))
+            .bind(format!("-{} days", 7 + i))
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        // Clean up posts older than 7 days
+        let deleted = cleanup_old_posts(&pool, 7).await.unwrap();
+
+        // Should delete 4 old posts
+        assert_eq!(deleted, 4);
+
+        // Verify 3 recent posts remain
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notified_posts")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, 3);
+    }
+}
