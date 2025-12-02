@@ -129,12 +129,42 @@ Create a docker-compose.yml file:
 ```
 
 The main daemon notifier service will then run automatically, while making the tui front-end run only on-demand:
-  
+
 Example Usage:
 ```bash
   docker compose up -d                    # Run daemon
   docker compose run --rm reddit-notifier-tui  # Run TUI
 ```
+
+---
+
+## ⚠️ Important: Database Concurrency
+
+**Do NOT run multiple instances of the daemon (`reddit-notifier`) sharing the same SQLite database file.**
+
+While this application uses SQLite with WAL (Write-Ahead Logging) mode to support concurrent access between the daemon and TUI, **SQLite is not designed for multiple writer processes across different containers, hosts, or network volumes**.
+
+### ✅ Supported Configurations:
+- **One daemon** + **one or more TUI instances** sharing the same database (local filesystem or single-host volume)
+- Running the daemon and TUI in separate containers on the **same host** sharing a local volume
+
+### ❌ Unsupported Configurations:
+- Multiple daemon instances writing to the same database file
+- SQLite database on network-mounted storage (NFS, CIFS, cloud volumes) with multiple writers
+- Running the daemon in a scaled Docker/Kubernetes deployment (replicas > 1)
+
+### Why?
+SQLite's file locking mechanisms don't work reliably across network filesystems or multiple processes on different hosts. This can lead to:
+- Database corruption
+- Lock timeout errors
+- Data loss
+
+### Recommendations:
+- Run **exactly one daemon instance** per database file
+- If you need to monitor multiple daemons, use separate database files and daemon instances
+- The TUI can safely run concurrently with the daemon on the same host
+
+---
 
 # 📝 License
 
