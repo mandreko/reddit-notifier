@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use dotenvy::dotenv;
 use reqwest::Client;
-use sqlx::{SqlitePool, Sqlite};
+use sqlx::{sqlite::SqliteConnectOptions, SqlitePool, Sqlite};
 use sqlx::migrate::MigrateDatabase;
+use std::str::FromStr;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -28,7 +29,11 @@ async fn main() -> Result<()> {
         Sqlite::create_database(&cfg.database_url).await?;
     }
 
-    let pool = SqlitePool::connect(&cfg.database_url)
+    let connect_options = SqliteConnectOptions::from_str(&cfg.database_url)?
+        .create_if_missing(true)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
+
+    let pool = SqlitePool::connect_with(connect_options)
         .await
         .with_context(|| format!("failed to connect to {}", cfg.database_url))?;
 
