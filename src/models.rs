@@ -52,13 +52,29 @@ impl EndpointKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EndpointRow {
     pub id: i64,
     pub kind: EndpointKind,
     pub config_json: String,
     #[allow(dead_code)]
     pub active: bool,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SubscriptionRow {
+    pub id: i64,
+    pub subreddit: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct NotifiedPostRow {
+    pub id: i64,
+    pub subreddit: String,
+    pub post_id: String,
+    pub first_seen_at: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

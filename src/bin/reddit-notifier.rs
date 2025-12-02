@@ -6,14 +6,9 @@ use sqlx::migrate::MigrateDatabase;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-mod models;
-mod database;
-mod notifiers;
-mod poller;
-
-use crate::database::unique_subreddits;
-use crate::models::AppConfig;
-use crate::poller::poll_subreddit_loop;
+use reddit_notifier::database::unique_subreddits;
+use reddit_notifier::models::AppConfig;
+use reddit_notifier::poller::poll_subreddit_loop;
 
 #[tokio::main]
 async fn main() -> Result<()> {
