@@ -14,7 +14,10 @@ use reddit_notifier::poller::poll_subreddit_loop;
 async fn main() -> Result<()> {
     dotenv().ok();
     tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+        )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
