@@ -39,6 +39,18 @@ name = "healthcheck"
 path = "src/bin/healthcheck.rs"
 
 
+[profile.release]
+# Optimize for size
+opt-level = "z"
+# Enable Link Time Optimization for better optimization across crates
+lto = true
+# Use only 1 codegen unit for better optimization (slower compile, smaller binary)
+codegen-units = 1
+# Strip symbols from binary
+strip = true
+# Use abort instead of unwind to reduce binary size
+panic = "abort"
+
 [package.metadata.release]
 # Don't publish to crates.io (since this is primarily a Docker application)
 publish = false
