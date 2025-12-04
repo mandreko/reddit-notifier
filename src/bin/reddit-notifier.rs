@@ -4,13 +4,16 @@ use reqwest::Client;
 use sqlx::{sqlite::SqliteConnectOptions, Sqlite};
 use sqlx::migrate::MigrateDatabase;
 use std::str::FromStr;
-use tracing::info;
+use std::time::Duration;
+use tokio::signal;
+use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use reddit_notifier::database::unique_subreddits;
 use reddit_notifier::db_connection::{connect_with_retry, ConnectionConfig};
 use reddit_notifier::models::AppConfig;
-use reddit_notifier::poller::poll_subreddit_loop;
+use reddit_notifier::poller::poll_combined_subreddits_loop;
+use reddit_notifier::rate_limiter::RateLimiter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -50,7 +53,7 @@ async fn main() -> Result<()> {
     sqlx::migrate!()
         .run(&pool)
         .await
-        .expect("Failed to run migrations");
+        .context("Failed to run database migrations")?;
 
     let client = Client::builder()
         .user_agent(cfg.reddit_user_agent.clone())
@@ -62,22 +65,50 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    info!("Starting pollers for {} subreddit(s)", subreddits.len());
-    let mut handles = Vec::new();
-    for sr in subreddits {
-        let pool_clone = pool.clone();
-        let client_clone = client.clone();
-        let interval = cfg.poll_interval_secs;
-        handles.push(tokio::spawn(async move {
-            if let Err(e) = poll_subreddit_loop(pool_clone, client_clone, sr, interval).await {
-                tracing::error!("Poll loop terminated with error: {}", e);
+    // Create rate limiter for Reddit API calls
+    // Rate limiter uses token bucket algorithm: refills one token per second
+    // With rate_limit_per_minute tokens maximum
+    // This controls how frequently we poll Reddit
+    let rate_limiter = RateLimiter::new(
+        cfg.rate_limit_per_minute,
+        Duration::from_secs(1),
+    );
+
+    info!(
+        "Starting combined poller for {} subreddit(s) with rate limiting ({} req/min)",
+        subreddits.len(),
+        cfg.rate_limit_per_minute
+    );
+    info!("Reddit notifier is running. Press Ctrl+C to shutdown gracefully.");
+
+    // Use tokio::select! to race the poller against the shutdown signal
+    // Whichever completes first will be handled
+    tokio::select! {
+        // Wait for Ctrl+C shutdown signal
+        result = signal::ctrl_c() => {
+            match result {
+                Ok(()) => {
+                    info!("Received shutdown signal, cleaning up...");
+                }
+                Err(err) => {
+                    warn!("Unable to listen for shutdown signal: {}", err);
+                }
             }
-        }));
+        }
+        // Run the poller (this runs indefinitely until cancelled)
+        result = poll_combined_subreddits_loop(pool, client, subreddits, rate_limiter) => {
+            // The poller should run forever, so if it returns, something went wrong
+            match result {
+                Ok(()) => {
+                    warn!("Poller completed unexpectedly");
+                }
+                Err(e) => {
+                    warn!("Poller terminated with error: {}", e);
+                }
+            }
+        }
     }
 
-    for h in handles {
-        let _ = h.await;
-    }
-
+    info!("Shutdown complete");
     Ok(())
 }
