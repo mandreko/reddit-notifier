@@ -282,8 +282,16 @@ fn render_linking(
                     Style::default()
                 };
                 let kind_str = endpoint.kind.as_str();
-                ListItem::new(format!("{}{} {} - {}", prefix, checkbox, kind_str, endpoint.id))
-                    .style(style)
+                let display = if let Some(note) = &endpoint.note {
+                    if !note.is_empty() {
+                        format!("{}{} {} - {} ({})", prefix, checkbox, kind_str, endpoint.id, note)
+                    } else {
+                        format!("{}{} {} - {}", prefix, checkbox, kind_str, endpoint.id)
+                    }
+                } else {
+                    format!("{}{} {} - {}", prefix, checkbox, kind_str, endpoint.id)
+                };
+                ListItem::new(display).style(style)
             })
             .collect();
 
@@ -334,10 +342,19 @@ fn render_viewing(frame: &mut Frame, app: &App, area: Rect, endpoints: &[Endpoin
             .map(|endpoint| {
                 let active = if endpoint.active { "✓" } else { "✗" };
                 let kind_str = endpoint.kind.as_str();
-                ListItem::new(format!(
-                    "{} {} (ID: {}) - Active: {}",
-                    kind_str, endpoint.id, endpoint.id, active
-                ))
+                let display = if let Some(note) = &endpoint.note {
+                    if !note.is_empty() {
+                        format!(
+                            "{} (ID: {}) - {} - Active: {}",
+                            kind_str, endpoint.id, note, active
+                        )
+                    } else {
+                        format!("{} (ID: {}) - Active: {}", kind_str, endpoint.id, active)
+                    }
+                } else {
+                    format!("{} (ID: {}) - Active: {}", kind_str, endpoint.id, active)
+                };
+                ListItem::new(display)
             })
             .collect();
 
