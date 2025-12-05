@@ -3,28 +3,26 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Row, Table},
+    text::Line,
+    widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table},
     Frame,
 };
 
 use crate::database;
 use crate::models::database::{EndpointRow, SubscriptionRow};
 use crate::tui::app::{App, Screen};
+use crate::tui::state::Navigable;
+use crate::tui::widgets::common;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SubscriptionsMode {
     List,
     Creating(String), // Input buffer
-    Linking {
+    ManagingEndpoints {
         subscription_id: i64,
         all_endpoints: Vec<EndpointRow>,
         linked_endpoint_ids: Vec<i64>,
         selected_idx: usize,
-    },
-    Viewing {
-        subscription_id: i64,
-        linked_endpoints: Vec<EndpointRow>,
     },
     ConfirmDelete {
         subscription_id: i64,
@@ -36,8 +34,6 @@ pub struct SubscriptionsState {
     pub subscriptions: Vec<SubscriptionRow>,
     pub selected: usize,
     pub mode: SubscriptionsMode,
-    pub error_message: Option<String>,
-    pub success_message: Option<String>,
 }
 
 impl Default for SubscriptionsState {
@@ -52,25 +48,21 @@ impl SubscriptionsState {
             subscriptions: Vec::new(),
             selected: 0,
             mode: SubscriptionsMode::List,
-            error_message: None,
-            success_message: None,
         }
     }
+}
 
-    pub fn next(&mut self) {
-        if !self.subscriptions.is_empty() {
-            self.selected = (self.selected + 1) % self.subscriptions.len();
-        }
+impl Navigable for SubscriptionsState {
+    fn len(&self) -> usize {
+        self.subscriptions.len()
     }
 
-    pub fn previous(&mut self) {
-        if !self.subscriptions.is_empty() {
-            if self.selected > 0 {
-                self.selected -= 1;
-            } else {
-                self.selected = self.subscriptions.len() - 1;
-            }
-        }
+    fn selected(&self) -> usize {
+        self.selected
+    }
+
+    fn set_selected(&mut self, index: usize) {
+        self.selected = index;
     }
 }
 
@@ -91,27 +83,21 @@ pub fn render(frame: &mut Frame, app: &App) {
     match &app.subscriptions_state.mode {
         SubscriptionsMode::List => render_list(frame, app, area),
         SubscriptionsMode::Creating(input) => render_creating(frame, app, area, input),
-        SubscriptionsMode::Linking {
+        SubscriptionsMode::ManagingEndpoints {
             all_endpoints,
             linked_endpoint_ids,
             selected_idx,
             ..
-        } => render_linking(frame, app, area, all_endpoints, linked_endpoint_ids, *selected_idx),
-        SubscriptionsMode::Viewing {
-            linked_endpoints, ..
-        } => render_viewing(frame, app, area, linked_endpoints),
+        } => render_managing_endpoints(frame, app, area, all_endpoints, linked_endpoint_ids, *selected_idx),
         SubscriptionsMode::ConfirmDelete { subreddit_name, .. } => {
             render_list(frame, app, area);
-            render_confirm_delete(frame, area, subreddit_name);
+            let prompt = format!("Delete subscription '{}'?", subreddit_name);
+            common::render_confirm_dialog(frame, area, &prompt, "Confirm Delete");
         }
     }
 
-    // Show error/success messages
-    if let Some(msg) = &app.subscriptions_state.error_message {
-        render_message(frame, area, msg, Color::Red);
-    } else if let Some(msg) = &app.subscriptions_state.success_message {
-        render_message(frame, area, msg, Color::Green);
-    }
+    // Show error/success messages using centralized display
+    app.messages.render(frame, area);
 }
 
 fn render_list(frame: &mut Frame, app: &App, area: Rect) {
@@ -145,16 +131,8 @@ fn render_list(frame: &mut Frame, app: &App, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, sub)| {
-                let prefix = if i == app.subscriptions_state.selected {
-                    ">"
-                } else {
-                    " "
-                };
-                let style = if i == app.subscriptions_state.selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
+                let is_selected = i == app.subscriptions_state.selected;
+                let (prefix, style) = common::selection_style(is_selected);
                 let created_short = sub
                     .created_at
                     .split(' ')
@@ -193,8 +171,7 @@ fn render_list(frame: &mut Frame, app: &App, area: Rect) {
         "[↑/↓] Navigate  ".into(),
         "[n] New  ".into(),
         "[d] Delete  ".into(),
-        "[l] Link  ".into(),
-        "[Enter] View  ".into(),
+        "[Enter] Manage Endpoints  ".into(),
         "[Esc] Back".into(),
     ]))
     .alignment(Alignment::Center)
@@ -235,7 +212,7 @@ fn render_creating(frame: &mut Frame, _app: &App, area: Rect, input: &str) {
     frame.render_widget(help, chunks[2]);
 }
 
-fn render_linking(
+fn render_managing_endpoints(
     frame: &mut Frame,
     app: &App,
     area: Rect,
@@ -275,12 +252,8 @@ fn render_linking(
                 } else {
                     "[ ]"
                 };
-                let prefix = if i == selected_idx { "> " } else { "  " };
-                let style = if i == selected_idx {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
+                let is_selected = i == selected_idx;
+                let (prefix, style) = common::selection_style(is_selected);
                 let kind_str = endpoint.kind.as_str();
                 let display = if let Some(note) = &endpoint.note {
                     if !note.is_empty() {
@@ -310,145 +283,23 @@ fn render_linking(
     frame.render_widget(help, chunks[2]);
 }
 
-fn render_viewing(frame: &mut Frame, app: &App, area: Rect, endpoints: &[EndpointRow]) {
-    let chunks = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(0),
-        Constraint::Length(3),
-    ])
-    .split(area);
-
-    let selected_sub = &app.subscriptions_state.subscriptions[app.subscriptions_state.selected];
-    let title = Paragraph::new(format!(
-        "Endpoints Linked to '{}'",
-        selected_sub.subreddit
-    ))
-    .alignment(Alignment::Center)
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .style(Style::default().fg(Color::Cyan)),
-    );
-    frame.render_widget(title, chunks[0]);
-
-    if endpoints.is_empty() {
-        let empty = Paragraph::new("No endpoints linked. Press 'l' to link endpoints.")
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL));
-        frame.render_widget(empty, chunks[1]);
-    } else {
-        let items: Vec<ListItem> = endpoints
-            .iter()
-            .map(|endpoint| {
-                let active = if endpoint.active { "✓" } else { "✗" };
-                let kind_str = endpoint.kind.as_str();
-                let display = if let Some(note) = &endpoint.note {
-                    if !note.is_empty() {
-                        format!(
-                            "{} (ID: {}) - {} - Active: {}",
-                            kind_str, endpoint.id, note, active
-                        )
-                    } else {
-                        format!("{} (ID: {}) - Active: {}", kind_str, endpoint.id, active)
-                    }
-                } else {
-                    format!("{} (ID: {}) - Active: {}", kind_str, endpoint.id, active)
-                };
-                ListItem::new(display)
-            })
-            .collect();
-
-        let list = List::new(items).block(Block::default().borders(Borders::ALL));
-        frame.render_widget(list, chunks[1]);
-    }
-
-    let help = Paragraph::new("[Esc] Back")
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
-    frame.render_widget(help, chunks[2]);
-}
-
-fn render_confirm_delete(frame: &mut Frame, area: Rect, subreddit_name: &str) {
-    let popup_area = centered_rect(50, 30, area);
-    let text = format!("Delete subscription '{}'?", subreddit_name);
-    let popup = Paragraph::new(vec![
-        Line::from(""),
-        Line::from(text).alignment(Alignment::Center),
-        Line::from("").alignment(Alignment::Center),
-        Line::from(vec![
-            Span::raw("["),
-            Span::styled("y", Style::default().fg(Color::Yellow)),
-            Span::raw("] Yes    ["),
-            Span::styled("n", Style::default().fg(Color::Yellow)),
-            Span::raw("] No"),
-        ])
-        .alignment(Alignment::Center),
-    ])
-    .block(
-        Block::default()
-            .title("Confirm Delete")
-            .borders(Borders::ALL)
-            .style(Style::default().fg(Color::Red)),
-    );
-
-    frame.render_widget(Clear, popup_area);
-    frame.render_widget(popup, popup_area);
-}
-
-fn render_message(frame: &mut Frame, area: Rect, message: &str, color: Color) {
-    let popup_area = centered_rect(60, 20, area);
-    let popup = Paragraph::new(vec![
-        Line::from(""),
-        Line::from(message).alignment(Alignment::Center),
-        Line::from(""),
-        Line::from("[Press any key]").alignment(Alignment::Center),
-    ])
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .style(Style::default().fg(color)),
-    );
-
-    frame.render_widget(Clear, popup_area);
-    frame.render_widget(popup, popup_area);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(r);
-
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(popup_layout[1])[1]
-}
-
 pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     // Clear messages on any key if shown
-    if app.subscriptions_state.error_message.is_some()
-        || app.subscriptions_state.success_message.is_some()
-    {
-        app.subscriptions_state.error_message = None;
-        app.subscriptions_state.success_message = None;
+    if app.messages.has_message() {
+        app.messages.clear();
         return Ok(());
     }
 
     match &app.subscriptions_state.mode.clone() {
         SubscriptionsMode::List => handle_list_mode(app, key).await?,
         SubscriptionsMode::Creating(input) => handle_creating_mode(app, key, input).await?,
-        SubscriptionsMode::Linking {
+        SubscriptionsMode::ManagingEndpoints {
             subscription_id,
             all_endpoints,
             linked_endpoint_ids,
             selected_idx,
         } => {
-            handle_linking_mode(
+            handle_managing_endpoints_mode(
                 app,
                 key,
                 *subscription_id,
@@ -458,7 +309,6 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             )
             .await?
         }
-        SubscriptionsMode::Viewing { .. } => handle_viewing_mode(app, key).await?,
         SubscriptionsMode::ConfirmDelete {
             subscription_id,
             subreddit_name,
@@ -484,28 +334,18 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
                 };
             }
         }
-        KeyCode::Char('l') => {
+        KeyCode::Enter => {
             if !app.subscriptions_state.subscriptions.is_empty() {
                 let sub = &app.subscriptions_state.subscriptions[app.subscriptions_state.selected];
                 let all_endpoints = database::list_endpoints(&app.pool).await?;
                 let linked = database::get_subscription_endpoints(&app.pool, sub.id).await?;
                 let linked_ids: Vec<i64> = linked.iter().map(|e| e.id).collect();
 
-                app.subscriptions_state.mode = SubscriptionsMode::Linking {
+                app.subscriptions_state.mode = SubscriptionsMode::ManagingEndpoints {
                     subscription_id: sub.id,
                     all_endpoints,
                     linked_endpoint_ids: linked_ids,
                     selected_idx: 0,
-                };
-            }
-        }
-        KeyCode::Enter => {
-            if !app.subscriptions_state.subscriptions.is_empty() {
-                let sub = &app.subscriptions_state.subscriptions[app.subscriptions_state.selected];
-                let linked = database::get_subscription_endpoints(&app.pool, sub.id).await?;
-                app.subscriptions_state.mode = SubscriptionsMode::Viewing {
-                    subscription_id: sub.id,
-                    linked_endpoints: linked,
                 };
             }
         }
@@ -531,8 +371,7 @@ async fn handle_creating_mode(app: &mut App, key: KeyEvent, input: &str) -> Resu
         }
         KeyCode::Enter => {
             if new_input.is_empty() {
-                app.subscriptions_state.error_message =
-                    Some("Subreddit name cannot be empty".to_string());
+                app.messages.set_error("Subreddit name cannot be empty".to_string());
                 app.subscriptions_state.mode = SubscriptionsMode::List;
             } else {
                 match database::create_subscription(&app.pool, &new_input).await {
@@ -541,8 +380,7 @@ async fn handle_creating_mode(app: &mut App, key: KeyEvent, input: &str) -> Resu
                         app.subscriptions_state.mode = SubscriptionsMode::List;
                     }
                     Err(e) => {
-                        app.subscriptions_state.error_message =
-                            Some(format!("Failed to create subscription: {}", e));
+                        app.messages.set_error(format!("Failed to create subscription: {}", e));
                         app.subscriptions_state.mode = SubscriptionsMode::List;
                     }
                 }
@@ -556,7 +394,7 @@ async fn handle_creating_mode(app: &mut App, key: KeyEvent, input: &str) -> Resu
     Ok(())
 }
 
-async fn handle_linking_mode(
+async fn handle_managing_endpoints_mode(
     app: &mut App,
     key: KeyEvent,
     subscription_id: i64,
@@ -574,7 +412,7 @@ async fn handle_linking_mode(
             } else {
                 new_selected = all_endpoints.len().saturating_sub(1);
             }
-            app.subscriptions_state.mode = SubscriptionsMode::Linking {
+            app.subscriptions_state.mode = SubscriptionsMode::ManagingEndpoints {
                 subscription_id,
                 all_endpoints: all_endpoints.to_vec(),
                 linked_endpoint_ids: new_linked,
@@ -585,7 +423,7 @@ async fn handle_linking_mode(
             if !all_endpoints.is_empty() {
                 new_selected = (new_selected + 1) % all_endpoints.len();
             }
-            app.subscriptions_state.mode = SubscriptionsMode::Linking {
+            app.subscriptions_state.mode = SubscriptionsMode::ManagingEndpoints {
                 subscription_id,
                 all_endpoints: all_endpoints.to_vec(),
                 linked_endpoint_ids: new_linked,
@@ -600,7 +438,7 @@ async fn handle_linking_mode(
                 } else {
                     new_linked.push(endpoint_id);
                 }
-                app.subscriptions_state.mode = SubscriptionsMode::Linking {
+                app.subscriptions_state.mode = SubscriptionsMode::ManagingEndpoints {
                     subscription_id,
                     all_endpoints: all_endpoints.to_vec(),
                     linked_endpoint_ids: new_linked,
@@ -641,11 +479,6 @@ async fn handle_linking_mode(
     Ok(())
 }
 
-async fn handle_viewing_mode(app: &mut App, _key: KeyEvent) -> Result<()> {
-    app.subscriptions_state.mode = SubscriptionsMode::List;
-    Ok(())
-}
-
 async fn handle_confirm_delete_mode(
     app: &mut App,
     key: KeyEvent,
@@ -660,8 +493,7 @@ async fn handle_confirm_delete_mode(
                     app.subscriptions_state.mode = SubscriptionsMode::List;
                 }
                 Err(e) => {
-                    app.subscriptions_state.error_message =
-                        Some(format!("Failed to delete: {}", e));
+                    app.messages.set_error(format!("Failed to delete: {}", e));
                     app.subscriptions_state.mode = SubscriptionsMode::List;
                 }
             }

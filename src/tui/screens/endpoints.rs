@@ -3,14 +3,16 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Row, Table},
+    text::Line,
+    widgets::{Block, Borders, Paragraph, Row, Table},
     Frame,
 };
 
 use crate::database;
 use crate::models::database::EndpointRow;
 use crate::tui::app::{App, Screen};
+use crate::tui::state::Navigable;
+use crate::tui::widgets::common;
 use crate::tui::widgets::{ConfigAction, ConfigBuilder};
 
 #[derive(Debug, Clone)]
@@ -34,8 +36,6 @@ pub struct EndpointsState {
     pub endpoints: Vec<EndpointRow>,
     pub selected: usize,
     pub mode: EndpointsMode,
-    pub error_message: Option<String>,
-    pub success_message: Option<String>,
 }
 
 impl Default for EndpointsState {
@@ -50,25 +50,21 @@ impl EndpointsState {
             endpoints: Vec::new(),
             selected: 0,
             mode: EndpointsMode::List,
-            error_message: None,
-            success_message: None,
         }
     }
+}
 
-    pub fn next(&mut self) {
-        if !self.endpoints.is_empty() {
-            self.selected = (self.selected + 1) % self.endpoints.len();
-        }
+impl Navigable for EndpointsState {
+    fn len(&self) -> usize {
+        self.endpoints.len()
     }
 
-    pub fn previous(&mut self) {
-        if !self.endpoints.is_empty() {
-            if self.selected > 0 {
-                self.selected -= 1;
-            } else {
-                self.selected = self.endpoints.len() - 1;
-            }
-        }
+    fn selected(&self) -> usize {
+        self.selected
+    }
+
+    fn set_selected(&mut self, index: usize) {
+        self.selected = index;
     }
 }
 
@@ -99,16 +95,13 @@ pub fn render(frame: &mut Frame, app: &App) {
         EndpointsMode::Viewing { endpoint } => render_viewing(frame, app, area, endpoint),
         EndpointsMode::ConfirmDelete { endpoint_desc, .. } => {
             render_list(frame, app, area);
-            render_confirm_delete(frame, area, endpoint_desc);
+            let prompt = format!("Delete {}?", endpoint_desc);
+            common::render_confirm_dialog(frame, area, &prompt, "Confirm Delete");
         }
     }
 
-    // Show error/success messages
-    if let Some(msg) = &app.endpoints_state.error_message {
-        render_message(frame, area, msg, Color::Red);
-    } else if let Some(msg) = &app.endpoints_state.success_message {
-        render_message(frame, area, msg, Color::Green);
-    }
+    // Show error/success messages using centralized display
+    app.messages.render(frame, area);
 }
 
 fn render_list(frame: &mut Frame, app: &App, area: Rect) {
@@ -142,18 +135,10 @@ fn render_list(frame: &mut Frame, app: &App, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, endpoint)| {
-                let prefix = if i == app.endpoints_state.selected {
-                    ">"
-                } else {
-                    " "
-                };
-                let style = if i == app.endpoints_state.selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
+                let is_selected = i == app.endpoints_state.selected;
+                let (prefix, style) = common::selection_style(is_selected);
 
-                let active = if endpoint.active { "✓" } else { "✗" };
+                let active = if endpoint.active { "[x]" } else { "[ ]" };
                 let kind_str = endpoint.kind.as_str();
 
                 let note_display = endpoint.note.as_deref().unwrap_or("");
@@ -196,7 +181,7 @@ fn render_list(frame: &mut Frame, app: &App, area: Rect) {
         "[n] New  ".into(),
         "[e] Edit  ".into(),
         "[d] Delete  ".into(),
-        "[t] Toggle  ".into(),
+        "[Space] Toggle  ".into(),
         "[Enter] View  ".into(),
         "[Esc] Back".into(),
     ]))
@@ -249,74 +234,10 @@ fn render_viewing(frame: &mut Frame, _app: &App, area: Rect, endpoint: &Endpoint
     frame.render_widget(help, chunks[2]);
 }
 
-fn render_confirm_delete(frame: &mut Frame, area: Rect, endpoint_desc: &str) {
-    let popup_area = centered_rect(50, 30, area);
-    let text = format!("Delete endpoint '{}'?", endpoint_desc);
-    let popup = Paragraph::new(vec![
-        Line::from(""),
-        Line::from(text).alignment(Alignment::Center),
-        Line::from("").alignment(Alignment::Center),
-        Line::from(vec![
-            Span::raw("["),
-            Span::styled("y", Style::default().fg(Color::Yellow)),
-            Span::raw("] Yes    ["),
-            Span::styled("n", Style::default().fg(Color::Yellow)),
-            Span::raw("] No"),
-        ])
-        .alignment(Alignment::Center),
-    ])
-    .block(
-        Block::default()
-            .title("Confirm Delete")
-            .borders(Borders::ALL)
-            .style(Style::default().fg(Color::Red)),
-    );
-
-    frame.render_widget(Clear, popup_area);
-    frame.render_widget(popup, popup_area);
-}
-
-fn render_message(frame: &mut Frame, area: Rect, message: &str, color: Color) {
-    let popup_area = centered_rect(60, 20, area);
-    let popup = Paragraph::new(vec![
-        Line::from(""),
-        Line::from(message).alignment(Alignment::Center),
-        Line::from(""),
-        Line::from("[Press any key]").alignment(Alignment::Center),
-    ])
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .style(Style::default().fg(color)),
-    );
-
-    frame.render_widget(Clear, popup_area);
-    frame.render_widget(popup, popup_area);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(r);
-
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(popup_layout[1])[1]
-}
-
 pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     // Clear messages on any key if shown
-    if app.endpoints_state.error_message.is_some()
-        || app.endpoints_state.success_message.is_some()
-    {
-        app.endpoints_state.error_message = None;
-        app.endpoints_state.success_message = None;
+    if app.messages.has_message() {
+        app.messages.clear();
         return Ok(());
     }
 
@@ -355,8 +276,7 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
                         };
                     }
                     Err(e) => {
-                        app.endpoints_state.error_message =
-                            Some(format!("Failed to load config: {}", e));
+                        app.messages.set_error(format!("Failed to load config: {}", e));
                     }
                 }
             }
@@ -371,7 +291,7 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
                 };
             }
         }
-        KeyCode::Char('t') => {
+        KeyCode::Char(' ') => {
             if !app.endpoints_state.endpoints.is_empty() {
                 let endpoint_id = app.endpoints_state.endpoints[app.endpoints_state.selected].id;
                 match database::toggle_endpoint_active(&app.pool, endpoint_id).await {
@@ -380,8 +300,7 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
                         // Silently update the list - no success message needed
                     }
                     Err(e) => {
-                        app.endpoints_state.error_message =
-                            Some(format!("Failed to toggle: {}", e));
+                        app.messages.set_error(format!("Failed to toggle: {}", e));
                     }
                 }
             }
@@ -415,14 +334,13 @@ async fn handle_creating_mode(app: &mut App, key: KeyEvent, builder: &ConfigBuil
                             app.endpoints_state.mode = EndpointsMode::List;
                         }
                         Err(e) => {
-                            app.endpoints_state.error_message =
-                                Some(format!("Failed to create endpoint: {}", e));
+                            app.messages.set_error(format!("Failed to create endpoint: {}", e));
                             app.endpoints_state.mode = EndpointsMode::List;
                         }
                     }
                 }
                 Err(e) => {
-                    app.endpoints_state.error_message = Some(format!("Validation error: {}", e));
+                    app.messages.set_error(format!("Validation error: {}", e));
                     app.endpoints_state.mode = EndpointsMode::List;
                 }
             }
@@ -457,14 +375,13 @@ async fn handle_editing_mode(
                             app.endpoints_state.mode = EndpointsMode::List;
                         }
                         Err(e) => {
-                            app.endpoints_state.error_message =
-                                Some(format!("Failed to update endpoint: {}", e));
+                            app.messages.set_error(format!("Failed to update endpoint: {}", e));
                             app.endpoints_state.mode = EndpointsMode::List;
                         }
                     }
                 }
                 Err(e) => {
-                    app.endpoints_state.error_message = Some(format!("Validation error: {}", e));
+                    app.messages.set_error(format!("Validation error: {}", e));
                     app.endpoints_state.mode = EndpointsMode::List;
                 }
             }
@@ -502,7 +419,7 @@ async fn handle_confirm_delete_mode(
                     app.endpoints_state.mode = EndpointsMode::List;
                 }
                 Err(e) => {
-                    app.endpoints_state.error_message = Some(format!("Failed to delete: {}", e));
+                    app.messages.set_error(format!("Failed to delete: {}", e));
                     app.endpoints_state.mode = EndpointsMode::List;
                 }
             }

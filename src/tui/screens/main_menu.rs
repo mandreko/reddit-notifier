@@ -1,14 +1,13 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::{Alignment, Constraint, Layout},
-    style::{Color, Modifier, Style},
-    text::Line,
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
 
 use crate::tui::app::{App, Screen};
+use crate::tui::state::Navigable;
+use crate::tui::widgets::common;
 
 pub struct MainMenuState {
     selected: usize,
@@ -34,86 +33,57 @@ impl MainMenuState {
             ],
         }
     }
+}
 
-    pub fn next(&mut self) {
-        self.selected = (self.selected + 1) % self.items.len();
+impl Navigable for MainMenuState {
+    fn len(&self) -> usize {
+        self.items.len()
     }
 
-    pub fn previous(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
-        } else {
-            self.selected = self.items.len() - 1;
-        }
-    }
-
-    pub fn selected(&self) -> usize {
+    fn selected(&self) -> usize {
         self.selected
+    }
+
+    fn set_selected(&mut self, index: usize) {
+        self.selected = index;
     }
 }
 
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    // Create layout
-    let chunks = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(0),
-        Constraint::Length(3),
-    ])
-    .split(area);
+    // Create standard 3-section layout using common component
+    let chunks = common::render_screen_layout(area);
 
-    // Title
-    let title = Paragraph::new("Reddit Notifier TUI")
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .style(Style::default().fg(Color::Cyan)),
-        );
-    frame.render_widget(title, chunks[0]);
+    // Render title using common component
+    common::render_title(frame, chunks[0], "Reddit Notifier TUI");
 
-    // Menu items
+    // Menu items using common selection style
     let items: Vec<ListItem> = app
         .main_menu_state
         .items
         .iter()
         .enumerate()
         .map(|(i, item)| {
-            let prefix = if i == app.main_menu_state.selected {
-                "> "
-            } else {
-                "  "
-            };
-            let style = if i == app.main_menu_state.selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
+            let is_selected = i == app.main_menu_state.selected;
+            let (prefix, style) = common::selection_style(is_selected);
             ListItem::new(format!("{}{}", prefix, item)).style(style)
         })
         .collect();
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .style(Style::default()),
-    );
+    let list = List::new(items).block(Block::default().borders(Borders::ALL));
 
     let mut list_state = ListState::default();
     list_state.select(Some(app.main_menu_state.selected));
 
     frame.render_stateful_widget(list, chunks[1], &mut list_state);
 
-    // Help text
-    let help = Paragraph::new(Line::from(vec![
-        "[↑/↓] Navigate  ".into(),
-        "[Enter] Select  ".into(),
-        "[q] Quit".into(),
-    ]))
-    .alignment(Alignment::Center)
-    .block(Block::default().borders(Borders::ALL));
-    frame.render_widget(help, chunks[2]);
+    // Render help text using common component
+    common::render_help(
+        frame,
+        chunks[2],
+        &[("↑/↓", "Navigate"), ("Enter", "Select"), ("q", "Quit")],
+    );
 }
 
 pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
