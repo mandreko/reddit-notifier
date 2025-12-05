@@ -5,8 +5,7 @@ use sqlx::{sqlite::SqliteConnectOptions, Sqlite};
 use sqlx::migrate::MigrateDatabase;
 use std::str::FromStr;
 use std::time::Duration;
-use tokio::signal;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use reddit_notifier::database::unique_subreddits;
@@ -14,6 +13,7 @@ use reddit_notifier::db_connection::{connect_with_retry, ConnectionConfig};
 use reddit_notifier::models::config::AppConfig;
 use reddit_notifier::poller::poll_combined_subreddits_loop;
 use reddit_notifier::rate_limiter::RateLimiter;
+use reddit_notifier::shutdown::{race_with_shutdown, ShutdownRace};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -59,11 +59,29 @@ async fn main() -> Result<()> {
         .user_agent(cfg.reddit_user_agent.clone())
         .build()?;
 
-    let subreddits = unique_subreddits(&pool).await?;
-    if subreddits.is_empty() {
-        info!("No subscriptions configured. See README for setup SQL.");
-        return Ok(());
-    }
+    // Wait for subreddits to be configured
+    // Check every 10 seconds until subscriptions exist in the database
+    let subreddits = loop {
+        let subs = unique_subreddits(&pool).await?;
+        if !subs.is_empty() {
+            break subs;
+        }
+
+        // Show errors to the console, so that the user knows that there's no data
+        error!("No subscriptions configured in database. Waiting for configuration...");
+        error!("Add subscriptions to the database to start monitoring. See README for setup SQL or use reddit-notifier-tui.");
+
+        // Wait 10 seconds before checking again, or exit on Ctrl+C
+        match race_with_shutdown(tokio::time::sleep(Duration::from_secs(10))).await? {
+            ShutdownRace::Shutdown => {
+                info!("Received shutdown signal during startup");
+                return Ok(());
+            }
+            ShutdownRace::Completed(()) => {
+                // Continue checking
+            }
+        }
+    };
 
     // Create rate limiter for Reddit API calls
     // Rate limiter uses token bucket algorithm: refills one token per second
@@ -81,22 +99,12 @@ async fn main() -> Result<()> {
     );
     info!("Reddit notifier is running. Press Ctrl+C to shutdown gracefully.");
 
-    // Use tokio::select! to race the poller against the shutdown signal
-    // Whichever completes first will be handled
-    tokio::select! {
-        // Wait for Ctrl+C shutdown signal
-        result = signal::ctrl_c() => {
-            match result {
-                Ok(()) => {
-                    info!("Received shutdown signal, cleaning up...");
-                }
-                Err(err) => {
-                    warn!("Unable to listen for shutdown signal: {}", err);
-                }
-            }
+    // Race the poller against the shutdown signal
+    match race_with_shutdown(poll_combined_subreddits_loop(pool, client, subreddits, rate_limiter)).await? {
+        ShutdownRace::Shutdown => {
+            info!("Received shutdown signal, cleaning up...");
         }
-        // Run the poller (this runs indefinitely until cancelled)
-        result = poll_combined_subreddits_loop(pool, client, subreddits, rate_limiter) => {
+        ShutdownRace::Completed(result) => {
             // The poller should run forever, so if it returns, something went wrong
             match result {
                 Ok(()) => {
