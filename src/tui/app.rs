@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 use std::time::Duration;
 
 use super::screens;
+use super::state::MessageDisplay;
 use super::ui;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +21,7 @@ pub struct App {
     pub pool: SqlitePool,
     pub current_screen: Screen,
     pub should_quit: bool,
+    pub messages: MessageDisplay,
     pub main_menu_state: screens::MainMenuState,
     pub subscriptions_state: screens::SubscriptionsState,
     pub endpoints_state: screens::EndpointsState,
@@ -33,6 +35,7 @@ impl App {
             pool,
             current_screen: Screen::MainMenu,
             should_quit: false,
+            messages: MessageDisplay::new(),
             main_menu_state: screens::MainMenuState::new(),
             subscriptions_state: screens::SubscriptionsState::new(),
             endpoints_state: screens::EndpointsState::new(),
@@ -81,7 +84,7 @@ impl App {
         Ok(())
     }
 
-    async fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
+    pub(crate) async fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
         // Global quit key
         if key.code == KeyCode::Char('q') && self.current_screen == Screen::MainMenu {
             self.should_quit = true;

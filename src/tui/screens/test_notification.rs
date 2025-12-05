@@ -2,7 +2,7 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Layout},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::Line,
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
@@ -12,6 +12,8 @@ use crate::database;
 use crate::models::database::EndpointRow;
 use crate::notifiers;
 use crate::tui::app::{App, Screen};
+use crate::tui::state::Navigable;
+use crate::tui::widgets::common;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TestStatus {
@@ -41,21 +43,19 @@ impl TestNotificationState {
             status: TestStatus::Ready,
         }
     }
+}
 
-    pub fn next(&mut self) {
-        if !self.endpoints.is_empty() {
-            self.selected = (self.selected + 1) % self.endpoints.len();
-        }
+impl Navigable for TestNotificationState {
+    fn len(&self) -> usize {
+        self.endpoints.len()
     }
 
-    pub fn previous(&mut self) {
-        if !self.endpoints.is_empty() {
-            if self.selected > 0 {
-                self.selected -= 1;
-            } else {
-                self.selected = self.endpoints.len() - 1;
-            }
-        }
+    fn selected(&self) -> usize {
+        self.selected
+    }
+
+    fn set_selected(&mut self, index: usize) {
+        self.selected = index;
     }
 }
 
@@ -110,31 +110,41 @@ pub fn render(frame: &mut Frame, app: &App) {
             .iter()
             .enumerate()
             .map(|(i, endpoint)| {
-                let prefix = if i == app.test_notification_state.selected {
-                    "> "
-                } else {
-                    "  "
-                };
-                let style = if i == app.test_notification_state.selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
+                let is_selected = i == app.test_notification_state.selected;
+                let (prefix, style) = common::selection_style(is_selected);
                 let kind_str = endpoint.kind.as_str();
-                let config_preview = if endpoint.config_json.len() > 40 {
-                    format!("{}...", &endpoint.config_json[..40])
+
+                // Format: "prefix number. kind (ID: id) - note"
+                let display = if let Some(note) = &endpoint.note {
+                    if !note.is_empty() {
+                        format!(
+                            "{}{}. {} (ID: {}) - {}",
+                            prefix,
+                            i + 1,
+                            kind_str,
+                            endpoint.id,
+                            note
+                        )
+                    } else {
+                        format!(
+                            "{}{}. {} (ID: {})",
+                            prefix,
+                            i + 1,
+                            kind_str,
+                            endpoint.id
+                        )
+                    }
                 } else {
-                    endpoint.config_json.clone()
+                    format!(
+                        "{}{}. {} (ID: {})",
+                        prefix,
+                        i + 1,
+                        kind_str,
+                        endpoint.id
+                    )
                 };
-                ListItem::new(format!(
-                    "{}{}. {} - ID: {} - {}",
-                    prefix,
-                    i + 1,
-                    kind_str,
-                    endpoint.id,
-                    config_preview
-                ))
-                .style(style)
+
+                ListItem::new(display).style(style)
             })
             .collect();
 

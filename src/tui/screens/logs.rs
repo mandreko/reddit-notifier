@@ -11,6 +11,7 @@ use ratatui::{
 use crate::database;
 use crate::models::database::NotifiedPostRow;
 use crate::tui::app::{App, Screen};
+use crate::tui::widgets::common;
 
 const PAGE_SIZE: i64 = 50;
 
@@ -193,19 +194,11 @@ fn render_list_mode(frame: &mut Frame, app: &App, area: Rect) {
                     .unwrap_or(&post.first_seen_at)
                     .replace('T', " ");
 
-                let prefix = if i == app.logs_state.selected_post {
-                    ">"
-                } else {
-                    " "
-                };
-                let style = if i == app.logs_state.selected_post {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
+                let is_selected = i == app.logs_state.selected_post;
+                let (prefix, style) = common::selection_style(is_selected);
 
                 Row::new(vec![
-                    prefix.to_string(),
+                    prefix,
                     post.subreddit.clone(),
                     post.post_id.clone(),
                     timestamp_short,
@@ -255,7 +248,7 @@ fn render_list_mode(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_truncate_dialog(frame: &mut Frame, app: &App, area: Rect) {
-    let popup_area = centered_rect(60, 40, area);
+    let popup_area = common::centered_rect(60, 40, area);
 
     let result_text = if let Some(ref result) = app.logs_state.truncate_result {
         vec![
@@ -305,7 +298,7 @@ fn render_truncate_dialog(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_confirm_delete(frame: &mut Frame, area: Rect, post_id: i64) {
-    let popup_area = centered_rect(50, 30, area);
+    let popup_area = common::centered_rect(50, 30, area);
     let text = format!("Delete log entry #{}?", post_id);
     let popup = Paragraph::new(vec![
         Line::from(""),
@@ -336,7 +329,7 @@ fn render_filter_mode(frame: &mut Frame, app: &App, area: Rect) {
     render_list_mode(frame, app, area);
 
     // Render filter popup
-    let popup_area = centered_rect(60, 60, area);
+    let popup_area = common::centered_rect(60, 60, area);
 
     let mut items = vec![ListItem::new(
         if app.logs_state.filter_selected == 0 {
@@ -353,13 +346,9 @@ fn render_filter_mode(frame: &mut Frame, app: &App, area: Rect) {
 
     for (i, sub) in app.logs_state.available_subreddits.iter().enumerate() {
         let is_selected = app.logs_state.filter_selected == i + 1;
-        let prefix = if is_selected { "> " } else { "  " };
+        let (prefix, style) = common::selection_style(is_selected);
         items.push(
-            ListItem::new(format!("{}{}", prefix, sub)).style(if is_selected {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            }),
+            ListItem::new(format!("{}{}", prefix, sub)).style(style),
         );
     }
 
@@ -372,22 +361,6 @@ fn render_filter_mode(frame: &mut Frame, app: &App, area: Rect) {
 
     frame.render_widget(ratatui::widgets::Clear, popup_area);
     frame.render_widget(list, popup_area);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(r);
-
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(popup_layout[1])[1]
 }
 
 pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
