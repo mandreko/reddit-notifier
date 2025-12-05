@@ -84,12 +84,13 @@ async fn main() -> Result<()> {
     };
 
     // Create rate limiter for Reddit API calls
-    // Rate limiter uses token bucket algorithm: refills one token per second
-    // With rate_limit_per_minute tokens maximum
-    // This controls how frequently we poll Reddit
+    // Rate limiter uses token bucket algorithm
+    // Max tokens: rate_limit_per_minute (allows burst requests)
+    // Refill rate: 60 seconds / rate_limit_per_minute (spreads requests evenly)
+    // E.g., 4 req/min = 1 token every 15 seconds
     let rate_limiter = RateLimiter::new(
         cfg.rate_limit_per_minute,
-        Duration::from_secs(1),
+        Duration::from_secs(60) / cfg.rate_limit_per_minute,
     );
 
     info!(

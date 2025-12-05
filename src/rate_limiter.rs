@@ -105,4 +105,90 @@ mod tests {
         limiter.acquire().await;
         limiter.acquire().await;
     }
+
+    #[tokio::test]
+    async fn test_rate_limiter_respects_requests_per_minute() {
+        // Simulate the daemon's rate limiter configuration
+        // Using 120 req/min for faster testing (500ms per request)
+        let requests_per_minute = 120;
+        let limiter = RateLimiter::new(
+            requests_per_minute,
+            Duration::from_secs(60) / requests_per_minute,
+        );
+
+        // Consume initial burst tokens (should be instant)
+        let start = Instant::now();
+        for _ in 0..requests_per_minute {
+            limiter.acquire().await;
+        }
+        let burst_duration = start.elapsed();
+
+        // Burst should complete very quickly (well under 1 second)
+        assert!(
+            burst_duration < Duration::from_secs(1),
+            "Initial burst took too long: {:?}",
+            burst_duration
+        );
+
+        // Now the bucket is empty, next requests should be rate-limited
+        // With 120 req/min, each token takes 500ms to refill
+        // Test that 6 more requests take approximately 3 seconds (6 * 500ms)
+        let start = Instant::now();
+        for _ in 0..6 {
+            limiter.acquire().await;
+        }
+        let rate_limited_duration = start.elapsed();
+
+        // Should take between 2.5s and 3.5s (allowing some tolerance)
+        let expected = Duration::from_millis(3000);
+        let min_expected = expected - Duration::from_millis(500);
+        let max_expected = expected + Duration::from_millis(500);
+
+        assert!(
+            rate_limited_duration >= min_expected,
+            "Rate limiting too fast: expected ~{:?}, got {:?}",
+            expected,
+            rate_limited_duration
+        );
+        assert!(
+            rate_limited_duration <= max_expected,
+            "Rate limiting too slow: expected ~{:?}, got {:?}",
+            expected,
+            rate_limited_duration
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_with_low_rate() {
+        // Test with a very low rate similar to REDDIT_RATE_LIMIT_PER_MINUTE=4
+        // Using 12 req/min for reasonable test duration (5 seconds per token)
+        let requests_per_minute = 12;
+        let limiter = RateLimiter::new(
+            requests_per_minute,
+            Duration::from_secs(60) / requests_per_minute,
+        );
+
+        // Consume initial burst
+        for _ in 0..requests_per_minute {
+            limiter.acquire().await;
+        }
+
+        // Next 2 requests should take ~10 seconds (2 * 5 seconds)
+        let start = Instant::now();
+        limiter.acquire().await;
+        limiter.acquire().await;
+        let duration = start.elapsed();
+
+        // Should take between 9s and 11s
+        assert!(
+            duration >= Duration::from_secs(9),
+            "Rate limiting too fast: expected ~10s, got {:?}",
+            duration
+        );
+        assert!(
+            duration <= Duration::from_secs(11),
+            "Rate limiting too slow: expected ~10s, got {:?}",
+            duration
+        );
+    }
 }

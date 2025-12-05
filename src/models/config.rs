@@ -17,7 +17,7 @@ impl AppConfig {
         // Maximum: 50 requests/minute (safety cap to avoid Reddit bans)
         // Reddit's actual limit is ~60/min for unauthenticated requests
         const MAX_RATE_LIMIT: u32 = 50;
-        const DEFAULT_RATE_LIMIT: u32 = 20;
+        const DEFAULT_RATE_LIMIT: u32 = 10;
 
         let requested_rate = std::env::var("REDDIT_RATE_LIMIT_PER_MINUTE")
             .ok()
