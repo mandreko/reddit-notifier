@@ -84,7 +84,7 @@ impl App {
         Ok(())
     }
 
-    async fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
+    pub(crate) async fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
         // Global quit key
         if key.code == KeyCode::Char('q') && self.current_screen == Screen::MainMenu {
             self.should_quit = true;

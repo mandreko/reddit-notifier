@@ -83,16 +83,6 @@ pub fn render_help(frame: &mut Frame, area: Rect, items: &[(&str, &str)]) {
     frame.render_widget(widget, area);
 }
 
-/// Render an empty state message
-///
-/// Used when a list or table has no items to display.
-pub fn render_empty_state(frame: &mut Frame, area: Rect, message: &str) {
-    let widget = Paragraph::new(message)
-        .alignment(Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
-    frame.render_widget(widget, area);
-}
-
 /// Calculate a centered rectangle for popups
 ///
 /// Returns a rectangle centered within the given area, with the specified
