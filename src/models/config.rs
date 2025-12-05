@@ -13,11 +13,11 @@ impl AppConfig {
             std::env::var("DATABASE_URL").context("DATABASE_URL is required (e.g., sqlite://data.db)")?;
 
         // Rate limit for Reddit API calls (requests per minute)
-        // Default: 20 requests/minute (conservative to avoid Reddit's ~60/min limit)
-        // Maximum: 50 requests/minute (safety cap to avoid Reddit bans)
+        // Default: 4 requests/minute (conservative to avoid Reddit's ~60/min limit)
+        // Maximum: 45 requests/minute (safety cap to avoid Reddit bans)
         // Reddit's actual limit is ~60/min for unauthenticated requests
-        const MAX_RATE_LIMIT: u32 = 50;
-        const DEFAULT_RATE_LIMIT: u32 = 10;
+        const MAX_RATE_LIMIT: u32 = 45;
+        const DEFAULT_RATE_LIMIT: u32 = 4;
 
         let requested_rate = std::env::var("REDDIT_RATE_LIMIT_PER_MINUTE")
             .ok()
