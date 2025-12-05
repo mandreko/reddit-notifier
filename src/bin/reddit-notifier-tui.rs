@@ -1,7 +1,7 @@
 use anyhow::Result;
 use dotenvy::dotenv;
 use reddit_notifier::db_connection::{connect_with_retry, ConnectionConfig};
-use reddit_notifier::models::AppConfig;
+use reddit_notifier::models::config::AppConfig;
 use reddit_notifier::tui::App;
 use sqlx::sqlite::SqliteConnectOptions;
 use std::str::FromStr;

@@ -1,7 +1,8 @@
 use anyhow::Result;
 use sqlx::{sqlite::SqliteRow, Row, SqlitePool};
+use std::collections::HashMap;
 
-use crate::models::{EndpointKind, EndpointRow, NotifiedPostRow, SubscriptionRow};
+use crate::models::database::{EndpointKind, EndpointRow, NotifiedPostRow, SubscriptionRow};
 
 pub async fn unique_subreddits(pool: &SqlitePool) -> Result<Vec<String>> {
     let rows = sqlx::query(
@@ -23,23 +24,40 @@ pub async fn unique_subreddits(pool: &SqlitePool) -> Result<Vec<String>> {
     Ok(subs)
 }
 
-pub async fn endpoints_for_subreddit(pool: &SqlitePool, subreddit: &str) -> Result<Vec<EndpointRow>> {
+/// Fetch all subreddit-to-endpoints mappings in a single query
+///
+/// Returns a HashMap where keys are subreddit names and values are vectors of active
+/// endpoints subscribed to that subreddit.
+///
+/// This function is used by the combined poller to determine which endpoints should
+/// receive notifications for posts from each subreddit.
+pub async fn all_subreddit_endpoint_mappings(
+    pool: &SqlitePool,
+) -> Result<HashMap<String, Vec<EndpointRow>>> {
     let rows = sqlx::query(
         r#"
-        SELECT e.id as id, e.kind as kind, e.config_json as config_json, e.active as active, e.note as note
+        SELECT
+            s.subreddit,
+            e.id as id,
+            e.kind as kind,
+            e.config_json as config_json,
+            e.active as active,
+            e.note as note
         FROM endpoints e
         JOIN subscription_endpoints se ON se.endpoint_id = e.id
         JOIN subscriptions s ON s.id = se.subscription_id
-        WHERE s.subreddit = ?1 AND e.active = 1
+        WHERE e.active = 1
+        ORDER BY s.subreddit
         "#,
     )
-    .bind(subreddit)
     .fetch_all(pool)
     .await?;
 
-    // Parse each row and skip any with invalid endpoint kinds
-    let mut endpoints = Vec::new();
+    // Group endpoints by subreddit
+    let mut mappings: HashMap<String, Vec<EndpointRow>> = HashMap::new();
+
     for row in rows {
+        let subreddit = row.get::<String, _>("subreddit");
         let id = row.get::<i64, _>("id");
         let kind_str = row.get::<String, _>("kind");
 
@@ -47,21 +65,30 @@ pub async fn endpoints_for_subreddit(pool: &SqlitePool, subreddit: &str) -> Resu
         let kind = match kind_str.parse::<EndpointKind>() {
             Ok(k) => k,
             Err(_) => {
-                tracing::warn!("Invalid endpoint kind '{}' for endpoint id {} - skipping", kind_str, id);
-                continue; // Skip this endpoint
+                tracing::warn!(
+                    "Invalid endpoint kind '{}' for endpoint id {} - skipping",
+                    kind_str,
+                    id
+                );
+                continue;
             }
         };
 
-        endpoints.push(EndpointRow {
+        let endpoint = EndpointRow {
             id,
             kind,
             config_json: row.get::<String, _>("config_json"),
             active: row.get::<i64, _>("active") != 0,
             note: row.get::<Option<String>, _>("note"),
-        });
+        };
+
+        mappings
+            .entry(subreddit)
+            .or_default()
+            .push(endpoint);
     }
 
-    Ok(endpoints)
+    Ok(mappings)
 }
 
 /// Returns true if the (subreddit, post_id) was newly inserted.

@@ -9,7 +9,10 @@ use ratatui::{
 };
 use serde_json::json;
 
-use crate::models::{DiscordConfig, EndpointKind, PushoverConfig};
+use crate::models::{
+    database::EndpointKind,
+    notifiers::{DiscordConfig, PushoverConfig},
+};
 
 #[derive(Debug, Clone)]
 pub struct FormField {

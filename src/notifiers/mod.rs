@@ -2,7 +2,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use reqwest::Client;
 
-use crate::models::{DiscordConfig, EndpointRow, EndpointKind, PushoverConfig};
+use crate::models::{
+    database::{EndpointKind, EndpointRow},
+    notifiers::{DiscordConfig, PushoverConfig},
+};
 
 pub mod discord;
 pub mod pushover;

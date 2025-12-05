@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::database;
-use crate::models::NotifiedPostRow;
+use crate::models::database::NotifiedPostRow;
 use crate::tui::app::{App, Screen};
 
 const PAGE_SIZE: i64 = 50;

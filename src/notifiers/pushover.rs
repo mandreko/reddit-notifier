@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use reqwest::Client;
 use html_escape::decode_html_entities;
 
-use crate::models::PushoverConfig;
+use crate::models::notifiers::PushoverConfig;
 use super::Notifier;
 
 pub struct PushoverNotifier {

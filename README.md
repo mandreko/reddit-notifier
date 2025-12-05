@@ -38,7 +38,7 @@ cargo build --release
 Copy .env.example to .env and fill in the values:
 ```bash
 DATABASE_URL=sqlite://data.db
-POLL_INTERVAL_SECS=60
+REDDIT_RATE_LIMIT_PER_MINUTE=4
 REDDIT_USER_AGENT=reddit_notifier/1.0 (by u/yourusername)
 
 # Optional: Database connection retry configuration
@@ -52,7 +52,7 @@ REDDIT_USER_AGENT=reddit_notifier/1.0 (by u/yourusername)
 - `REDDIT_USER_AGENT` - User agent string (Reddit requires this to identify your app and username)
 
 **Optional Variables:**
-- `POLL_INTERVAL_SECS` - Seconds between Reddit polls (default: 60)
+- `REDDIT_RATE_LIMIT_PER_MINUTE` - Number of Reddit polls per minute (default: 4)
 - `DB_MAX_RETRIES` - Maximum database connection attempts at startup (default: 5)
 - `DB_INITIAL_DELAY_MS` - Initial delay between retry attempts in milliseconds (default: 500)
 - `DB_MAX_DELAY_MS` - Maximum delay between retry attempts in milliseconds (default: 5000)

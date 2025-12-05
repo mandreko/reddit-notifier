@@ -4,13 +4,16 @@ use reqwest::Client;
 use sqlx::{sqlite::SqliteConnectOptions, Sqlite};
 use sqlx::migrate::MigrateDatabase;
 use std::str::FromStr;
-use tracing::info;
+use std::time::Duration;
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use reddit_notifier::database::unique_subreddits;
 use reddit_notifier::db_connection::{connect_with_retry, ConnectionConfig};
-use reddit_notifier::models::AppConfig;
-use reddit_notifier::poller::poll_subreddit_loop;
+use reddit_notifier::models::config::AppConfig;
+use reddit_notifier::poller::poll_combined_subreddits_loop;
+use reddit_notifier::rate_limiter::RateLimiter;
+use reddit_notifier::shutdown::{race_with_shutdown, ShutdownRace};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -50,34 +53,71 @@ async fn main() -> Result<()> {
     sqlx::migrate!()
         .run(&pool)
         .await
-        .expect("Failed to run migrations");
+        .context("Failed to run database migrations")?;
 
     let client = Client::builder()
         .user_agent(cfg.reddit_user_agent.clone())
         .build()?;
 
-    let subreddits = unique_subreddits(&pool).await?;
-    if subreddits.is_empty() {
-        info!("No subscriptions configured. See README for setup SQL.");
-        return Ok(());
-    }
+    // Wait for subreddits to be configured
+    // Check every 10 seconds until subscriptions exist in the database
+    let subreddits = loop {
+        let subs = unique_subreddits(&pool).await?;
+        if !subs.is_empty() {
+            break subs;
+        }
 
-    info!("Starting pollers for {} subreddit(s)", subreddits.len());
-    let mut handles = Vec::new();
-    for sr in subreddits {
-        let pool_clone = pool.clone();
-        let client_clone = client.clone();
-        let interval = cfg.poll_interval_secs;
-        handles.push(tokio::spawn(async move {
-            if let Err(e) = poll_subreddit_loop(pool_clone, client_clone, sr, interval).await {
-                tracing::error!("Poll loop terminated with error: {}", e);
+        // Show errors to the console, so that the user knows that there's no data
+        error!("No subscriptions configured in database. Waiting for configuration...");
+        error!("Add subscriptions to the database to start monitoring. See README for setup SQL or use reddit-notifier-tui.");
+
+        // Wait 10 seconds before checking again, or exit on Ctrl+C
+        match race_with_shutdown(tokio::time::sleep(Duration::from_secs(10))).await? {
+            ShutdownRace::Shutdown => {
+                info!("Received shutdown signal during startup");
+                return Ok(());
             }
-        }));
+            ShutdownRace::Completed(()) => {
+                // Continue checking
+            }
+        }
+    };
+
+    // Create rate limiter for Reddit API calls
+    // Rate limiter uses token bucket algorithm
+    // Max tokens: rate_limit_per_minute (allows burst requests)
+    // Refill rate: 60 seconds / rate_limit_per_minute (spreads requests evenly)
+    // E.g., 4 req/min = 1 token every 15 seconds
+    let rate_limiter = RateLimiter::new(
+        cfg.rate_limit_per_minute,
+        Duration::from_secs(60) / cfg.rate_limit_per_minute,
+    );
+
+    info!(
+        "Starting combined poller for {} subreddit(s) with rate limiting ({} req/min)",
+        subreddits.len(),
+        cfg.rate_limit_per_minute
+    );
+    info!("Reddit notifier is running. Press Ctrl+C to shutdown gracefully.");
+
+    // Race the poller against the shutdown signal
+    match race_with_shutdown(poll_combined_subreddits_loop(pool, client, subreddits, rate_limiter)).await? {
+        ShutdownRace::Shutdown => {
+            info!("Received shutdown signal, cleaning up...");
+        }
+        ShutdownRace::Completed(result) => {
+            // The poller should run forever, so if it returns, something went wrong
+            match result {
+                Ok(()) => {
+                    warn!("Poller completed unexpectedly");
+                }
+                Err(e) => {
+                    warn!("Poller terminated with error: {}", e);
+                }
+            }
+        }
     }
 
-    for h in handles {
-        let _ = h.await;
-    }
-
+    info!("Shutdown complete");
     Ok(())
 }
