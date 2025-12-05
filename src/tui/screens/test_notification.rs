@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::database;
-use crate::models::EndpointRow;
+use crate::models::database::EndpointRow;
 use crate::notifiers;
 use crate::tui::app::{App, Screen};
 

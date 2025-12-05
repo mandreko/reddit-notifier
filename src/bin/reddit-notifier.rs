@@ -11,7 +11,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use reddit_notifier::database::unique_subreddits;
 use reddit_notifier::db_connection::{connect_with_retry, ConnectionConfig};
-use reddit_notifier::models::AppConfig;
+use reddit_notifier::models::config::AppConfig;
 use reddit_notifier::poller::poll_combined_subreddits_loop;
 use reddit_notifier::rate_limiter::RateLimiter;
 

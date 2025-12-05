@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use reqwest::Client;
 use html_escape::decode_html_entities;
 
-use crate::models::DiscordConfig;
+use crate::models::notifiers::DiscordConfig;
 use super::Notifier;
 
 pub struct DiscordNotifier {

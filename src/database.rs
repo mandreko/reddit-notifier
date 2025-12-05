@@ -2,7 +2,7 @@ use anyhow::Result;
 use sqlx::{sqlite::SqliteRow, Row, SqlitePool};
 use std::collections::HashMap;
 
-use crate::models::{EndpointKind, EndpointRow, NotifiedPostRow, SubscriptionRow};
+use crate::models::database::{EndpointKind, EndpointRow, NotifiedPostRow, SubscriptionRow};
 
 pub async fn unique_subreddits(pool: &SqlitePool) -> Result<Vec<String>> {
     let rows = sqlx::query(

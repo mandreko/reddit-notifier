@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::database;
-use crate::models::{EndpointRow, SubscriptionRow};
+use crate::models::database::{EndpointRow, SubscriptionRow};
 use crate::tui::app::{App, Screen};
 
 #[derive(Debug, Clone, PartialEq)]

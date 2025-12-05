@@ -6,7 +6,7 @@ use tracing::{info, warn, error};
 use chrono::{Utc, TimeDelta};
 
 use crate::database::{all_subreddit_endpoint_mappings, record_if_new};
-use crate::models::{EndpointRow, RedditListing};
+use crate::models::{database::EndpointRow, reddit_api::RedditListing};
 use crate::rate_limiter::RateLimiter;
 
 /// Combined subreddit poller - polls multiple subreddits in a single API call
