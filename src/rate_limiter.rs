@@ -37,7 +37,11 @@ impl RateLimiter {
     pub fn new(max_tokens: u32, refill_rate: Duration) -> Self {
         Self {
             state: Arc::new(Mutex::new(RateLimiterState {
-                tokens: max_tokens,
+                // Start with 1 token instead of max_tokens to prevent startup bursts
+                // This allows immediate responsiveness (1 request) without hammering
+                // the API with multiple requests when the daemon starts/restarts.
+                // After the first request, proper rate limiting kicks in.
+                tokens: 1,
                 last_refill: Instant::now(),
             })),
             max_tokens,
@@ -81,27 +85,53 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_rate_limiter_allows_initial_requests() {
+    async fn test_rate_limiter_allows_single_initial_request() {
+        // Rate limiter starts with 1 token to prevent startup bursts
         let limiter = RateLimiter::new(5, Duration::from_millis(100));
 
-        // Should be able to make 5 requests immediately
-        for _ in 0..5 {
-            limiter.acquire().await;
-        }
+        // First request should be immediate (uses the initial token)
+        let start = Instant::now();
+        limiter.acquire().await;
+        let first_duration = start.elapsed();
+
+        // Should complete almost instantly (well under 50ms)
+        assert!(
+            first_duration < Duration::from_millis(50),
+            "First request should be immediate, took {:?}",
+            first_duration
+        );
+
+        // Second request should wait for refill (100ms)
+        let start = Instant::now();
+        limiter.acquire().await;
+        let second_duration = start.elapsed();
+
+        // Should take at least 100ms (the refill_rate)
+        assert!(
+            second_duration >= Duration::from_millis(100),
+            "Second request should wait for refill, took {:?}",
+            second_duration
+        );
+
+        // Should complete within reasonable time (100ms + tolerance)
+        assert!(
+            second_duration < Duration::from_millis(150),
+            "Second request took too long: {:?}",
+            second_duration
+        );
     }
 
     #[tokio::test]
     async fn test_rate_limiter_refills_over_time() {
-        let limiter = RateLimiter::new(2, Duration::from_millis(100));
+        let limiter = RateLimiter::new(5, Duration::from_millis(100));
 
-        // Consume all tokens
-        limiter.acquire().await;
+        // Consume the initial token
         limiter.acquire().await;
 
-        // Wait for refill
+        // Wait for refill (250ms should refill 2 tokens at 100ms each)
         tokio::time::sleep(Duration::from_millis(250)).await;
 
-        // Should have refilled at least 2 tokens
+        // Should have refilled at least 2 tokens, so these should not block
         limiter.acquire().await;
         limiter.acquire().await;
     }
@@ -116,23 +146,20 @@ mod tests {
             Duration::from_secs(60) / requests_per_minute,
         );
 
-        // Consume initial burst tokens (should be instant)
+        // First request uses the initial token (should be instant)
         let start = Instant::now();
-        for _ in 0..requests_per_minute {
-            limiter.acquire().await;
-        }
-        let burst_duration = start.elapsed();
+        limiter.acquire().await;
+        let first_duration = start.elapsed();
 
-        // Burst should complete very quickly (well under 1 second)
         assert!(
-            burst_duration < Duration::from_secs(1),
-            "Initial burst took too long: {:?}",
-            burst_duration
+            first_duration < Duration::from_millis(50),
+            "First request should be instant, took {:?}",
+            first_duration
         );
 
-        // Now the bucket is empty, next requests should be rate-limited
+        // Next 6 requests should be rate-limited
         // With 120 req/min, each token takes 500ms to refill
-        // Test that 6 more requests take approximately 3 seconds (6 * 500ms)
+        // Test that 6 requests take approximately 3 seconds (6 * 500ms)
         let start = Instant::now();
         for _ in 0..6 {
             limiter.acquire().await;
@@ -168,12 +195,18 @@ mod tests {
             Duration::from_secs(60) / requests_per_minute,
         );
 
-        // Consume initial burst
-        for _ in 0..requests_per_minute {
-            limiter.acquire().await;
-        }
+        // First request uses the initial token (should be instant)
+        let start = Instant::now();
+        limiter.acquire().await;
+        let first_duration = start.elapsed();
 
-        // Next 2 requests should take ~10 seconds (2 * 5 seconds)
+        assert!(
+            first_duration < Duration::from_millis(50),
+            "First request should be instant, took {:?}",
+            first_duration
+        );
+
+        // Next 2 requests should each take ~5 seconds to refill (total ~10s)
         let start = Instant::now();
         limiter.acquire().await;
         limiter.acquire().await;
