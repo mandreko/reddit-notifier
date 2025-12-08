@@ -1,13 +1,13 @@
 use anyhow::Result;
 use reqwest::Client;
-use sqlx::SqlitePool;
 use std::collections::HashSet;
+use std::sync::Arc;
 use tracing::{info, warn, error};
 use chrono::{Utc, TimeDelta};
 
-use crate::database::{all_subreddit_endpoint_mappings, record_if_new};
 use crate::models::{database::EndpointRow, reddit_api::RedditListing};
 use crate::rate_limiter::RateLimiter;
+use crate::services::DatabaseService;
 
 /// Combined subreddit poller - polls multiple subreddits in a single API call
 ///
@@ -21,7 +21,7 @@ use crate::rate_limiter::RateLimiter;
 /// - Easier to implement global rate limiting
 ///
 /// # Arguments
-/// * `pool` - Database connection pool
+/// * `db` - Database service
 /// * `client` - HTTP client for making Reddit API calls
 /// * `subreddits` - List of subreddit names to poll (will be automatically batched)
 /// * `rate_limiter` - Rate limiter to respect Reddit's API limits
@@ -30,8 +30,8 @@ use crate::rate_limiter::RateLimiter;
 /// The poller runs continuously, making API calls as fast as the rate limiter allows.
 /// Configure the rate limiter (via REDDIT_RATE_LIMIT_PER_MINUTE) to control polling frequency.
 /// Default: 20 requests/minute. Reddit's limit is approximately 60 requests/minute.
-pub async fn poll_combined_subreddits_loop(
-    pool: SqlitePool,
+pub async fn poll_combined_subreddits_loop<D: DatabaseService>(
+    db: Arc<D>,
     client: Client,
     subreddits: Vec<String>,
     rate_limiter: RateLimiter,
@@ -62,7 +62,7 @@ pub async fn poll_combined_subreddits_loop(
     loop {
         // Fetch the subreddit-to-endpoints mapping once per poll cycle
         // This is more efficient than querying for each post
-        let mappings = match all_subreddit_endpoint_mappings(&pool).await {
+        let mappings = match db.all_subreddit_endpoint_mappings().await {
             Ok(m) => m,
             Err(e) => {
                 error!("Failed to fetch subreddit-endpoint mappings: {} - will retry", e);
@@ -122,7 +122,7 @@ pub async fn poll_combined_subreddits_loop(
                         }
 
                         // Check if we've already notified about this post
-                        let is_new = match record_if_new(&pool, subreddit, &post.id).await {
+                        let is_new = match db.record_if_new(subreddit, &post.id).await {
                             Ok(new) => new,
                             Err(e) => {
                                 error!(

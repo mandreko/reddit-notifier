@@ -8,8 +8,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::database;
 use crate::models::database::NotifiedPostRow;
+use crate::services::DatabaseService;
 use crate::tui::app::{App, Screen};
 use crate::tui::widgets::common;
 
@@ -99,17 +99,17 @@ impl LogsState {
     }
 }
 
-pub async fn load_logs(app: &mut App) -> Result<()> {
+pub async fn load_logs<D: DatabaseService>(app: &mut App<D>) -> Result<()> {
     // Load available subreddits for filter
-    let subs = database::list_subscriptions(&app.pool).await?;
+    let subs = app.db.list_subscriptions().await?;
     app.logs_state.available_subreddits = subs.iter().map(|s| s.subreddit.clone()).collect();
 
     // Load posts based on filter
     let offset = app.logs_state.current_page * PAGE_SIZE;
     let posts = if let Some(ref subreddit) = app.logs_state.filter_subreddit {
-        database::list_notified_posts_by_subreddit(&app.pool, subreddit, PAGE_SIZE, offset).await?
+        app.db.list_notified_posts_by_subreddit(subreddit, PAGE_SIZE, offset).await?
     } else {
-        database::list_notified_posts(&app.pool, PAGE_SIZE, offset).await?
+        app.db.list_notified_posts(PAGE_SIZE, offset).await?
     };
 
     // Estimate total count (not exact but good enough for pagination)
@@ -123,7 +123,7 @@ pub async fn load_logs(app: &mut App) -> Result<()> {
     Ok(())
 }
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     let area = frame.area();
 
     if app.logs_state.filter_mode {
@@ -143,7 +143,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 }
 
-fn render_list_mode(frame: &mut Frame, app: &App, area: Rect) {
+fn render_list_mode<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(3),
@@ -247,7 +247,7 @@ fn render_list_mode(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(help, chunks[3]);
 }
 
-fn render_truncate_dialog(frame: &mut Frame, app: &App, area: Rect) {
+fn render_truncate_dialog<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) {
     let popup_area = common::centered_rect(60, 40, area);
 
     let result_text = if let Some(ref result) = app.logs_state.truncate_result {
@@ -324,7 +324,7 @@ fn render_confirm_delete(frame: &mut Frame, area: Rect, post_id: i64) {
     frame.render_widget(popup, popup_area);
 }
 
-fn render_filter_mode(frame: &mut Frame, app: &App, area: Rect) {
+fn render_filter_mode<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) {
     // Render list mode in background
     render_list_mode(frame, app, area);
 
@@ -363,7 +363,7 @@ fn render_filter_mode(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(list, popup_area);
 }
 
-pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
+pub async fn handle_key<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
     if app.logs_state.truncate_mode {
         handle_truncate_mode(app, key).await
     } else if app.logs_state.confirm_delete.is_some() {
@@ -375,7 +375,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     }
 }
 
-async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
+async fn handle_list_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Up => {
             app.logs_state.prev_post();
@@ -414,7 +414,7 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
-async fn handle_truncate_mode(app: &mut App, key: KeyEvent) -> Result<()> {
+async fn handle_truncate_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
     // If showing result, any key closes the dialog
     if app.logs_state.truncate_result.is_some() {
         app.logs_state.truncate_mode = false;
@@ -438,7 +438,7 @@ async fn handle_truncate_mode(app: &mut App, key: KeyEvent) -> Result<()> {
             // Parse and execute truncate
             if let Ok(days) = app.logs_state.truncate_days_input.parse::<i64>() {
                 if days > 0 {
-                    match database::cleanup_old_posts(&app.pool, days).await {
+                    match app.db.cleanup_old_posts(days).await {
                         Ok(deleted) => {
                             let msg = format!("Deleted {} post(s) older than {} day(s)", deleted, days);
                             app.logs_state.truncate_result = Some(msg);
@@ -464,7 +464,7 @@ async fn handle_truncate_mode(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
-async fn handle_filter_mode(app: &mut App, key: KeyEvent) -> Result<()> {
+async fn handle_filter_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Up => {
             app.logs_state.prev_filter();
@@ -494,11 +494,11 @@ async fn handle_filter_mode(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
-async fn handle_confirm_delete_mode(app: &mut App, key: KeyEvent) -> Result<()> {
+async fn handle_confirm_delete_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
             if let Some(post_id) = app.logs_state.confirm_delete {
-                database::delete_notified_post(&app.pool, post_id).await?;
+                app.db.delete_notified_post(post_id).await?;
                 app.logs_state.confirm_delete = None;
                 app.logs_state.selected_post = 0;
                 load_logs(app).await?;
