@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::Line,
-    widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table},
+    widgets::{Block, Borders, Paragraph, Row},
     Frame,
 };
 
@@ -14,7 +14,7 @@ use crate::services::DatabaseService;
 use crate::tui::app::{App, Screen};
 use crate::tui::screen_trait::{Screen as ScreenTrait, ScreenId, ScreenTransition};
 use crate::tui::state::Navigable;
-use crate::tui::widgets::{common, text_input, ModalDialog, TextInput};
+use crate::tui::widgets::{common, text_input, CheckboxList, ColumnDef, ModalDialog, SelectableTable, TextInput};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SubscriptionsMode {
@@ -22,9 +22,7 @@ pub enum SubscriptionsMode {
     Creating(TextInput), // Input widget
     ManagingEndpoints {
         subscription_id: i64,
-        all_endpoints: Vec<EndpointRow>,
-        linked_endpoint_ids: Vec<i64>,
-        selected_idx: usize,
+        checkbox_list: CheckboxList<EndpointRow>,
     },
     ConfirmDelete {
         subscription_id: i64,
@@ -88,12 +86,9 @@ pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     match &app.states.subscriptions_state.mode {
         SubscriptionsMode::List => render_list(frame, app, area),
         SubscriptionsMode::Creating(input) => render_creating(frame, app, area, input),
-        SubscriptionsMode::ManagingEndpoints {
-            all_endpoints,
-            linked_endpoint_ids,
-            selected_idx,
-            ..
-        } => render_managing_endpoints(frame, app, area, all_endpoints, linked_endpoint_ids, *selected_idx),
+        SubscriptionsMode::ManagingEndpoints { checkbox_list, .. } => {
+            render_managing_endpoints(frame, app, area, checkbox_list)
+        }
         SubscriptionsMode::ConfirmDelete { subreddit_name, .. } => {
             render_list(frame, app, area);
             let prompt = format!("Delete subscription '{}'?", subreddit_name);
@@ -124,54 +119,38 @@ fn render_list<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) 
         );
     frame.render_widget(title, chunks[0]);
 
-    // Table
-    if app.states.subscriptions_state.subscriptions.is_empty() {
-        let empty = Paragraph::new("No subscriptions yet. Press 'n' to create one.")
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL));
-        frame.render_widget(empty, chunks[1]);
-    } else {
-        let rows: Vec<Row> = app
-            .states
-            .subscriptions_state
-            .subscriptions
-            .iter()
-            .enumerate()
-            .map(|(i, sub)| {
-                let is_selected = i == app.states.subscriptions_state.selected;
-                let (prefix, style) = common::selection_style(is_selected);
-                let created_short = sub
-                    .created_at
-                    .split(' ')
-                    .next()
-                    .unwrap_or(&sub.created_at);
-                Row::new(vec![
-                    prefix.to_string(),
-                    sub.id.to_string(),
-                    sub.subreddit.clone(),
-                    created_short.to_string(),
-                ])
-                .style(style)
-            })
-            .collect();
+    // Table using SelectableTable
+    let columns = vec![
+        ColumnDef::new("", Constraint::Length(2)),           // Selection marker
+        ColumnDef::new("ID", Constraint::Length(5)),
+        ColumnDef::new("Subreddit", Constraint::Percentage(60)),
+        ColumnDef::new("Created", Constraint::Percentage(40)),
+    ];
 
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(2),      // Selection marker
-                Constraint::Length(5),      // ID
-                Constraint::Percentage(60), // Subreddit (takes most space)
-                Constraint::Percentage(40), // Created timestamp
-            ],
-        )
-        .header(
-            Row::new(vec!["", "ID", "Subreddit", "Created"])
-                .style(Style::default().add_modifier(Modifier::BOLD)),
-        )
-        .block(Block::default().borders(Borders::ALL));
+    let mut table = SelectableTable::new(
+        app.states.subscriptions_state.subscriptions.clone(),
+        columns,
+    )
+    .with_empty_message("No subscriptions yet. Press 'n' to create one.");
 
-        frame.render_widget(table, chunks[1]);
-    }
+    // Sync the selection with the app state
+    table.selected = app.states.subscriptions_state.selected;
+
+    table.render(frame, chunks[1], |sub, _i, is_selected| {
+        let (prefix, style) = common::selection_style(is_selected);
+        let created_short = sub
+            .created_at
+            .split(' ')
+            .next()
+            .unwrap_or(&sub.created_at);
+        Row::new(vec![
+            prefix.to_string(),
+            sub.id.to_string(),
+            sub.subreddit.clone(),
+            created_short.to_string(),
+        ])
+        .style(style)
+    });
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
@@ -226,9 +205,7 @@ fn render_managing_endpoints<D: DatabaseService>(
     frame: &mut Frame,
     app: &App<D>,
     area: Rect,
-    endpoints: &[EndpointRow],
-    linked_ids: &[i64],
-    selected_idx: usize,
+    checkbox_list: &CheckboxList<EndpointRow>,
 ) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
@@ -247,44 +224,30 @@ fn render_managing_endpoints<D: DatabaseService>(
         );
     frame.render_widget(title, chunks[0]);
 
-    if endpoints.is_empty() {
+    if checkbox_list.is_empty() {
         let empty = Paragraph::new("No endpoints available. Create one first in Manage Endpoints.")
             .alignment(Alignment::Center)
             .block(Block::default().borders(Borders::ALL));
         frame.render_widget(empty, chunks[1]);
     } else {
-        let items: Vec<ListItem> = endpoints
-            .iter()
-            .enumerate()
-            .map(|(i, endpoint)| {
-                let checkbox = if linked_ids.contains(&endpoint.id) {
-                    "[x]"
+        checkbox_list.render(frame, chunks[1], |endpoint| {
+            let kind_str = endpoint.kind.as_str();
+            if let Some(note) = &endpoint.note {
+                if !note.is_empty() {
+                    format!("{} - {} ({})", kind_str, endpoint.id, note)
                 } else {
-                    "[ ]"
-                };
-                let is_selected = i == selected_idx;
-                let (prefix, style) = common::selection_style(is_selected);
-                let kind_str = endpoint.kind.as_str();
-                let display = if let Some(note) = &endpoint.note {
-                    if !note.is_empty() {
-                        format!("{}{} {} - {} ({})", prefix, checkbox, kind_str, endpoint.id, note)
-                    } else {
-                        format!("{}{} {} - {}", prefix, checkbox, kind_str, endpoint.id)
-                    }
-                } else {
-                    format!("{}{} {} - {}", prefix, checkbox, kind_str, endpoint.id)
-                };
-                ListItem::new(display).style(style)
-            })
-            .collect();
-
-        let list = List::new(items).block(Block::default().borders(Borders::ALL));
-        frame.render_widget(list, chunks[1]);
+                    format!("{} - {}", kind_str, endpoint.id)
+                }
+            } else {
+                format!("{} - {}", kind_str, endpoint.id)
+            }
+        });
     }
 
     let help = Paragraph::new(Line::from(vec![
         "[↑/↓] Navigate  ".into(),
         "[Space] Toggle  ".into(),
+        "[a] Toggle All  ".into(),
         "[Enter] Save  ".into(),
         "[Esc] Cancel".into(),
     ]))
@@ -324,11 +287,19 @@ async fn handle_list_mode<D: DatabaseService>(
                 let linked = context.db.get_subscription_endpoints(sub.id).await?;
                 let linked_ids: Vec<i64> = linked.iter().map(|e| e.id).collect();
 
+                // Find indices of linked endpoints
+                let checked_indices: Vec<usize> = all_endpoints
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, endpoint)| linked_ids.contains(&endpoint.id))
+                    .map(|(i, _)| i)
+                    .collect();
+
+                let checkbox_list = CheckboxList::with_checked(all_endpoints, checked_indices);
+
                 state.mode = SubscriptionsMode::ManagingEndpoints {
                     subscription_id: sub.id,
-                    all_endpoints,
-                    linked_endpoint_ids: linked_ids,
-                    selected_idx: 0,
+                    checkbox_list,
                 };
             }
         }
@@ -383,54 +354,21 @@ async fn handle_managing_endpoints_mode<D: DatabaseService>(
     context: &mut crate::tui::app::AppContext<D>,
     key: KeyEvent,
     subscription_id: i64,
-    all_endpoints: &[EndpointRow],
-    linked_ids: &[i64],
-    selected_idx: usize,
+    checkbox_list: &CheckboxList<EndpointRow>,
 ) -> Result<()> {
-    let mut new_selected = selected_idx;
-    let mut new_linked = linked_ids.to_vec();
+    let mut new_list = checkbox_list.clone();
 
+    // Let CheckboxList handle its own keys (Up, Down, Space, 'a')
+    if new_list.handle_key(key) {
+        state.mode = SubscriptionsMode::ManagingEndpoints {
+            subscription_id,
+            checkbox_list: new_list,
+        };
+        return Ok(());
+    }
+
+    // Handle other keys
     match key.code {
-        KeyCode::Up => {
-            if new_selected > 0 {
-                new_selected -= 1;
-            } else {
-                new_selected = all_endpoints.len().saturating_sub(1);
-            }
-            state.mode = SubscriptionsMode::ManagingEndpoints {
-                subscription_id,
-                all_endpoints: all_endpoints.to_vec(),
-                linked_endpoint_ids: new_linked,
-                selected_idx: new_selected,
-            };
-        }
-        KeyCode::Down => {
-            if !all_endpoints.is_empty() {
-                new_selected = (new_selected + 1) % all_endpoints.len();
-            }
-            state.mode = SubscriptionsMode::ManagingEndpoints {
-                subscription_id,
-                all_endpoints: all_endpoints.to_vec(),
-                linked_endpoint_ids: new_linked,
-                selected_idx: new_selected,
-            };
-        }
-        KeyCode::Char(' ') => {
-            if !all_endpoints.is_empty() {
-                let endpoint_id = all_endpoints[selected_idx].id;
-                if let Some(pos) = new_linked.iter().position(|&id| id == endpoint_id) {
-                    new_linked.remove(pos);
-                } else {
-                    new_linked.push(endpoint_id);
-                }
-                state.mode = SubscriptionsMode::ManagingEndpoints {
-                    subscription_id,
-                    all_endpoints: all_endpoints.to_vec(),
-                    linked_endpoint_ids: new_linked,
-                    selected_idx: new_selected,
-                };
-            }
-        }
         KeyCode::Enter => {
             // Save changes
             let original_linked = context.db.get_subscription_endpoints(subscription_id)
@@ -438,6 +376,13 @@ async fn handle_managing_endpoints_mode<D: DatabaseService>(
                 .iter()
                 .map(|e| e.id)
                 .collect::<Vec<_>>();
+
+            // Get IDs of checked endpoints
+            let new_linked: Vec<i64> = new_list
+                .get_checked_items()
+                .iter()
+                .map(|endpoint| endpoint.id)
+                .collect();
 
             // Unlink removed endpoints
             for id in original_linked.iter() {
@@ -512,18 +457,14 @@ impl<D: DatabaseService> ScreenTrait<D> for SubscriptionsState {
             SubscriptionsMode::Creating(input) => handle_creating_mode(self, context, key, input).await?,
             SubscriptionsMode::ManagingEndpoints {
                 subscription_id,
-                all_endpoints,
-                linked_endpoint_ids,
-                selected_idx,
+                checkbox_list,
             } => {
                 handle_managing_endpoints_mode(
                     self,
                     context,
                     key,
                     *subscription_id,
-                    all_endpoints,
-                    linked_endpoint_ids,
-                    *selected_idx,
+                    checkbox_list,
                 )
                 .await?
             }

@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Row},
     Frame,
 };
 
@@ -13,7 +13,7 @@ use crate::models::database::NotifiedPostRow;
 use crate::services::DatabaseService;
 use crate::tui::app::{App, Screen};
 use crate::tui::screen_trait::{Screen as ScreenTrait, ScreenId, ScreenTransition};
-use crate::tui::widgets::common;
+use crate::tui::widgets::{common, ColumnDef, SelectableTable};
 
 const PAGE_SIZE: i64 = 50;
 
@@ -178,66 +178,47 @@ fn render_list_mode<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: R
         .block(Block::default().borders(Borders::ALL));
     frame.render_widget(filter, chunks[1]);
 
-    // Table
-    if app.states.logs_state.posts.is_empty() {
-        let empty = Paragraph::new("No notification history yet.")
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL));
-        frame.render_widget(empty, chunks[2]);
-    } else {
-        let rows: Vec<Row> = app
-            .states
-            .logs_state
-            .posts
-            .iter()
-            .enumerate()
-            .map(|(i, post)| {
-                // Format timestamp to be more readable
-                let timestamp_short = post
-                    .first_seen_at
-                    .split('.')
-                    .next()
-                    .unwrap_or(&post.first_seen_at)
-                    .replace('T', " ");
+    // Table using SelectableTable
+    let columns = vec![
+        ColumnDef::new("", Constraint::Length(2)),            // Selection marker
+        ColumnDef::new("Subreddit", Constraint::Percentage(25)),
+        ColumnDef::new("Post ID", Constraint::Percentage(30)),
+        ColumnDef::new("First Seen", Constraint::Percentage(45)),
+    ];
 
-                let is_selected = i == app.states.logs_state.selected_post;
-                let (prefix, style) = common::selection_style(is_selected);
+    let mut table = SelectableTable::new(
+        app.states.logs_state.posts.clone(),
+        columns,
+    )
+    .with_empty_message("No notification history yet.")
+    .with_block_title(format!(
+        "Page {} of {}",
+        app.states.logs_state.current_page + 1,
+        app.states.logs_state.total_pages()
+    ));
 
-                Row::new(vec![
-                    prefix,
-                    post.subreddit.clone(),
-                    post.post_id.clone(),
-                    timestamp_short,
-                ])
-                .style(style)
-            })
-            .collect();
+    // Sync the selection with the app state
+    table.selected = app.states.logs_state.selected_post;
 
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(2),      // Selection marker
-                Constraint::Percentage(25), // Subreddit
-                Constraint::Percentage(30), // Post ID
-                Constraint::Percentage(45), // First Seen timestamp
-            ],
-        )
-        .header(
-            Row::new(vec!["", "Subreddit", "Post ID", "First Seen"])
-                .style(Style::default().add_modifier(Modifier::BOLD)),
-        )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(
-                    "Page {} of {}",
-                    app.states.logs_state.current_page + 1,
-                    app.states.logs_state.total_pages()
-                )),
-        );
+    table.render(frame, chunks[2], |post, _i, is_selected| {
+        let (prefix, style) = common::selection_style(is_selected);
 
-        frame.render_widget(table, chunks[2]);
-    }
+        // Format timestamp to be more readable
+        let timestamp_short = post
+            .first_seen_at
+            .split('.')
+            .next()
+            .unwrap_or(&post.first_seen_at)
+            .replace('T', " ");
+
+        Row::new(vec![
+            prefix.to_string(),
+            post.subreddit.clone(),
+            post.post_id.clone(),
+            timestamp_short,
+        ])
+        .style(style)
+    });
 
     // Help text
     let help = Paragraph::new(Line::from(vec![

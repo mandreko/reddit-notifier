@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::Line,
-    widgets::{Block, Borders, Paragraph, Row, Table},
+    widgets::{Block, Borders, Paragraph, Row},
     Frame,
 };
 
@@ -15,7 +15,7 @@ use crate::tui::app::{App, Screen};
 use crate::tui::screen_trait::{Screen as ScreenTrait, ScreenId, ScreenTransition};
 use crate::tui::state::Navigable;
 use crate::tui::widgets::common;
-use crate::tui::widgets::{ConfigAction, ConfigBuilder, ModalDialog};
+use crate::tui::widgets::{ColumnDef, ConfigAction, ConfigBuilder, ModalDialog, SelectableTable};
 
 #[derive(Debug, Clone)]
 pub enum EndpointsMode {
@@ -125,59 +125,42 @@ fn render_list<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) 
         );
     frame.render_widget(title, chunks[0]);
 
-    // Table
-    if app.states.endpoints_state.endpoints.is_empty() {
-        let empty = Paragraph::new("No endpoints yet. Press 'n' to create one.")
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL));
-        frame.render_widget(empty, chunks[1]);
-    } else {
-        let rows: Vec<Row> = app
-            .states
-            .endpoints_state
-            .endpoints
-            .iter()
-            .enumerate()
-            .map(|(i, endpoint)| {
-                let is_selected = i == app.states.endpoints_state.selected;
-                let (prefix, style) = common::selection_style(is_selected);
+    // Table using SelectableTable
+    let columns = vec![
+        ColumnDef::new("", Constraint::Length(2)),            // Selection marker
+        ColumnDef::new("ID", Constraint::Length(5)),
+        ColumnDef::new("Type", Constraint::Length(10)),
+        ColumnDef::new("Active", Constraint::Length(8)),
+        ColumnDef::new("Note", Constraint::Percentage(20)),
+        ColumnDef::new("Config", Constraint::Percentage(55)),
+    ];
 
-                let active = if endpoint.active { "[x]" } else { "[ ]" };
-                let kind_str = endpoint.kind.as_str();
+    let mut table = SelectableTable::new(
+        app.states.endpoints_state.endpoints.clone(),
+        columns,
+    )
+    .with_empty_message("No endpoints yet. Press 'n' to create one.");
 
-                let note_display = endpoint.note.as_deref().unwrap_or("");
+    // Sync the selection with the app state
+    table.selected = app.states.endpoints_state.selected;
 
-                Row::new(vec![
-                    prefix.to_string(),
-                    endpoint.id.to_string(),
-                    kind_str.to_string(),
-                    active.to_string(),
-                    note_display.to_string(),
-                    endpoint.config_json.clone(),
-                ])
-                .style(style)
-            })
-            .collect();
+    table.render(frame, chunks[1], |endpoint, _i, is_selected| {
+        let (prefix, style) = common::selection_style(is_selected);
 
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(2),      // Selection marker
-                Constraint::Length(5),      // ID
-                Constraint::Length(10),     // Type
-                Constraint::Length(8),      // Active
-                Constraint::Percentage(20), // Note
-                Constraint::Percentage(55), // Config (takes remaining space)
-            ],
-        )
-        .header(
-            Row::new(vec!["", "ID", "Type", "Active", "Note", "Config"])
-                .style(Style::default().add_modifier(Modifier::BOLD)),
-        )
-        .block(Block::default().borders(Borders::ALL));
+        let active = if endpoint.active { "[x]" } else { "[ ]" };
+        let kind_str = endpoint.kind.as_str();
+        let note_display = endpoint.note.as_deref().unwrap_or("");
 
-        frame.render_widget(table, chunks[1]);
-    }
+        Row::new(vec![
+            prefix.to_string(),
+            endpoint.id.to_string(),
+            kind_str.to_string(),
+            active.to_string(),
+            note_display.to_string(),
+            endpoint.config_json.clone(),
+        ])
+        .style(style)
+    });
 
     // Help text
     let help = Paragraph::new(Line::from(vec![
