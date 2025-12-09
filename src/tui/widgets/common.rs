@@ -118,6 +118,7 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 /// * `message` - The message to display
 /// * `color` - Color for the popup border (e.g., Red for errors, Green for success)
 /// * `title` - Title for the popup (e.g., "Error" or "Success")
+#[deprecated(note = "Use ModalDialog::error(), ModalDialog::success(), or other ModalDialog constructors instead")]
 pub fn render_message_popup(
     frame: &mut Frame,
     area: Rect,
@@ -152,6 +153,7 @@ pub fn render_message_popup(
 /// * `area` - The full screen area (dialog will be centered)
 /// * `prompt` - The question to ask the user
 /// * `title` - Title for the dialog
+#[deprecated(note = "Use ModalDialog::confirm() instead")]
 pub fn render_confirm_dialog(
     frame: &mut Frame,
     area: Rect,

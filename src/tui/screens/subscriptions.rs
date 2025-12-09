@@ -14,12 +14,12 @@ use crate::services::DatabaseService;
 use crate::tui::app::{App, Screen};
 use crate::tui::screen_trait::{Screen as ScreenTrait, ScreenId, ScreenTransition};
 use crate::tui::state::Navigable;
-use crate::tui::widgets::common;
+use crate::tui::widgets::{common, text_input, ModalDialog, TextInput};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SubscriptionsMode {
     List,
-    Creating(String), // Input buffer
+    Creating(TextInput), // Input widget
     ManagingEndpoints {
         subscription_id: i64,
         all_endpoints: Vec<EndpointRow>,
@@ -97,7 +97,8 @@ pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
         SubscriptionsMode::ConfirmDelete { subreddit_name, .. } => {
             render_list(frame, app, area);
             let prompt = format!("Delete subscription '{}'?", subreddit_name);
-            common::render_confirm_dialog(frame, area, &prompt, "Confirm Delete");
+            let dialog = ModalDialog::confirm(prompt);
+            dialog.render(frame, area);
         }
     }
 
@@ -185,11 +186,13 @@ fn render_list<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) 
     frame.render_widget(help, chunks[2]);
 }
 
-fn render_creating<D: DatabaseService>(frame: &mut Frame, _app: &App<D>, area: Rect, input: &str) {
+fn render_creating<D: DatabaseService>(frame: &mut Frame, _app: &App<D>, area: Rect, input: &TextInput) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
+        Constraint::Length(1), // Label
+        Constraint::Length(3), // Input
         Constraint::Min(0),
-        Constraint::Length(3),
+        Constraint::Length(3), // Help
     ])
     .split(area);
 
@@ -202,12 +205,13 @@ fn render_creating<D: DatabaseService>(frame: &mut Frame, _app: &App<D>, area: R
         );
     frame.render_widget(title, chunks[0]);
 
-    let input_widget = Paragraph::new(format!("Subreddit name: {}_", input)).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Enter subreddit name (alphanumeric + underscores only)"),
-    );
-    frame.render_widget(input_widget, chunks[1]);
+    // Label
+    let label = Paragraph::new("Subreddit name (alphanumeric + underscores only):")
+        .style(Style::default().fg(Color::Yellow));
+    frame.render_widget(label, chunks[1]);
+
+    // TextInput widget
+    input.render(frame, chunks[2]);
 
     let help = Paragraph::new(Line::from(vec![
         "[Enter] Save  ".into(),
@@ -215,7 +219,7 @@ fn render_creating<D: DatabaseService>(frame: &mut Frame, _app: &App<D>, area: R
     ]))
     .alignment(Alignment::Center)
     .block(Block::default().borders(Borders::ALL));
-    frame.render_widget(help, chunks[2]);
+    frame.render_widget(help, chunks[4]);
 }
 
 fn render_managing_endpoints<D: DatabaseService>(
@@ -298,7 +302,11 @@ async fn handle_list_mode<D: DatabaseService>(
         KeyCode::Up => state.previous(),
         KeyCode::Down => state.next(),
         KeyCode::Char('n') => {
-            state.mode = SubscriptionsMode::Creating(String::new());
+            let mut input = TextInput::new()
+                .with_placeholder("Enter subreddit name")
+                .with_validator(text_input::subreddit_validator);
+            input.set_focused(true);
+            state.mode = SubscriptionsMode::Creating(input);
         }
         KeyCode::Char('d') => {
             if !state.subscriptions.is_empty() {
@@ -336,25 +344,17 @@ async fn handle_creating_mode<D: DatabaseService>(
     state: &mut SubscriptionsState,
     context: &mut crate::tui::app::AppContext<D>,
     key: KeyEvent,
-    input: &str,
+    input: &TextInput,
 ) -> Result<()> {
-    let mut new_input = input.to_string();
+    let mut new_input = input.clone();
 
     match key.code {
-        KeyCode::Char(c) if c.is_alphanumeric() || c == '_' => {
-            new_input.push(c);
-            state.mode = SubscriptionsMode::Creating(new_input);
-        }
-        KeyCode::Backspace => {
-            new_input.pop();
-            state.mode = SubscriptionsMode::Creating(new_input);
-        }
         KeyCode::Enter => {
-            if new_input.is_empty() {
+            if new_input.value().trim().is_empty() {
                 context.messages.set_error("Subreddit name cannot be empty".to_string());
                 state.mode = SubscriptionsMode::List;
             } else {
-                match context.db.create_subscription(&new_input).await {
+                match context.db.create_subscription(new_input.value()).await {
                     Ok(_) => {
                         load_subscriptions(state, context).await?;
                         state.mode = SubscriptionsMode::List;
@@ -369,7 +369,11 @@ async fn handle_creating_mode<D: DatabaseService>(
         KeyCode::Esc => {
             state.mode = SubscriptionsMode::List;
         }
-        _ => {}
+        _ => {
+            // Let TextInput handle the key
+            new_input.handle_key(key);
+            state.mode = SubscriptionsMode::Creating(new_input);
+        }
     }
     Ok(())
 }
