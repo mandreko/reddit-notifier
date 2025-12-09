@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState},
@@ -6,7 +7,8 @@ use ratatui::{
 };
 
 use crate::services::DatabaseService;
-use crate::tui::app::{App, Screen};
+use crate::tui::app::App;
+use crate::tui::screen_trait::{Screen as ScreenTrait, ScreenId, ScreenTransition};
 use crate::tui::state::Navigable;
 use crate::tui::widgets::common;
 
@@ -61,12 +63,13 @@ pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
 
     // Menu items using common selection style
     let items: Vec<ListItem> = app
+        .states
         .main_menu_state
         .items
         .iter()
         .enumerate()
         .map(|(i, item)| {
-            let is_selected = i == app.main_menu_state.selected;
+            let is_selected = i == app.states.main_menu_state.selected;
             let (prefix, style) = common::selection_style(is_selected);
             ListItem::new(format!("{}{}", prefix, item)).style(style)
         })
@@ -75,7 +78,7 @@ pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     let list = List::new(items).block(Block::default().borders(Borders::ALL));
 
     let mut list_state = ListState::default();
-    list_state.select(Some(app.main_menu_state.selected));
+    list_state.select(Some(app.states.main_menu_state.selected));
 
     frame.render_stateful_widget(list, chunks[1], &mut list_state);
 
@@ -87,22 +90,34 @@ pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     );
 }
 
-pub async fn handle_key<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
-    match key.code {
-        KeyCode::Up => app.main_menu_state.previous(),
-        KeyCode::Down => app.main_menu_state.next(),
-        KeyCode::Enter => {
-            match app.main_menu_state.selected() {
-                0 => app.current_screen = Screen::Subscriptions,
-                1 => app.current_screen = Screen::Endpoints,
-                2 => app.current_screen = Screen::TestNotification,
-                3 => app.current_screen = Screen::Logs,
-                4 => app.should_quit = true,
-                _ => {}
-            }
-        }
-        KeyCode::Char('q') => app.should_quit = true,
-        _ => {}
+#[async_trait]
+impl<D: DatabaseService> ScreenTrait<D> for MainMenuState {
+    fn render(&self, frame: &mut Frame, app: &App<D>) {
+        super::main_menu::render(frame, app)
     }
-    Ok(())
+
+    async fn handle_key(&mut self, _context: &mut crate::tui::app::AppContext<D>, key: KeyEvent) -> Result<ScreenTransition> {
+        match key.code {
+            KeyCode::Up => self.previous(),
+            KeyCode::Down => self.next(),
+            KeyCode::Enter => {
+                match self.selected() {
+                    0 => return Ok(ScreenTransition::GoTo(ScreenId::Subscriptions)),
+                    1 => return Ok(ScreenTransition::GoTo(ScreenId::Endpoints)),
+                    2 => return Ok(ScreenTransition::GoTo(ScreenId::TestNotification)),
+                    3 => return Ok(ScreenTransition::GoTo(ScreenId::Logs)),
+                    4 => return Ok(ScreenTransition::Quit),
+                    _ => {}
+                }
+            }
+            KeyCode::Char('q') => return Ok(ScreenTransition::Quit),
+            _ => {}
+        }
+
+        Ok(ScreenTransition::Stay)
+    }
+
+    fn id(&self) -> ScreenId {
+        ScreenId::MainMenu
+    }
 }

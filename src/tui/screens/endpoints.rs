@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
@@ -11,6 +12,7 @@ use ratatui::{
 use crate::models::database::EndpointRow;
 use crate::services::DatabaseService;
 use crate::tui::app::{App, Screen};
+use crate::tui::screen_trait::{Screen as ScreenTrait, ScreenId, ScreenTransition};
 use crate::tui::state::Navigable;
 use crate::tui::widgets::common;
 use crate::tui::widgets::{ConfigAction, ConfigBuilder};
@@ -68,13 +70,13 @@ impl Navigable for EndpointsState {
     }
 }
 
-pub async fn load_endpoints<D: DatabaseService>(app: &mut App<D>) -> Result<()> {
-    let endpoints = app.db.list_endpoints().await?;
-    app.endpoints_state.endpoints = endpoints;
-    if app.endpoints_state.selected >= app.endpoints_state.endpoints.len()
-        && !app.endpoints_state.endpoints.is_empty()
+pub async fn load_endpoints<D: DatabaseService>(state: &mut EndpointsState, context: &mut crate::tui::app::AppContext<D>) -> Result<()> {
+    let endpoints = context.db.list_endpoints().await?;
+    state.endpoints = endpoints;
+    if state.selected >= state.endpoints.len()
+        && !state.endpoints.is_empty()
     {
-        app.endpoints_state.selected = app.endpoints_state.endpoints.len() - 1;
+        state.selected = state.endpoints.len() - 1;
     }
     Ok(())
 }
@@ -82,7 +84,7 @@ pub async fn load_endpoints<D: DatabaseService>(app: &mut App<D>) -> Result<()> 
 pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     let area = frame.area();
 
-    match &app.endpoints_state.mode {
+    match &app.states.endpoints_state.mode {
         EndpointsMode::List => render_list(frame, app, area),
         EndpointsMode::Creating(builder) => {
             render_list(frame, app, area);
@@ -101,7 +103,7 @@ pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     }
 
     // Show error/success messages using centralized display
-    app.messages.render(frame, area);
+    app.context.messages.render(frame, area);
 }
 
 fn render_list<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) {
@@ -123,19 +125,20 @@ fn render_list<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) 
     frame.render_widget(title, chunks[0]);
 
     // Table
-    if app.endpoints_state.endpoints.is_empty() {
+    if app.states.endpoints_state.endpoints.is_empty() {
         let empty = Paragraph::new("No endpoints yet. Press 'n' to create one.")
             .alignment(Alignment::Center)
             .block(Block::default().borders(Borders::ALL));
         frame.render_widget(empty, chunks[1]);
     } else {
         let rows: Vec<Row> = app
+            .states
             .endpoints_state
             .endpoints
             .iter()
             .enumerate()
             .map(|(i, endpoint)| {
-                let is_selected = i == app.endpoints_state.selected;
+                let is_selected = i == app.states.endpoints_state.selected;
                 let (prefix, style) = common::selection_style(is_selected);
 
                 let active = if endpoint.active { "[x]" } else { "[ ]" };
@@ -234,92 +237,77 @@ fn render_viewing<D: DatabaseService>(frame: &mut Frame, _app: &App<D>, area: Re
     frame.render_widget(help, chunks[2]);
 }
 
-pub async fn handle_key<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
-    // Clear messages on any key if shown
-    if app.messages.has_message() {
-        app.messages.clear();
-        return Ok(());
-    }
-
-    match &app.endpoints_state.mode.clone() {
-        EndpointsMode::List => handle_list_mode(app, key).await?,
-        EndpointsMode::Creating(builder) => handle_creating_mode(app, key, builder).await?,
-        EndpointsMode::Editing {
-            endpoint_id,
-            builder,
-        } => handle_editing_mode(app, key, *endpoint_id, builder).await?,
-        EndpointsMode::Viewing { .. } => handle_viewing_mode(app, key).await?,
-        EndpointsMode::ConfirmDelete {
-            endpoint_id,
-            endpoint_desc,
-        } => handle_confirm_delete_mode(app, key, *endpoint_id, endpoint_desc).await?,
-    }
-
-    Ok(())
-}
-
-async fn handle_list_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
+async fn handle_list_mode<D: DatabaseService>(
+    state: &mut EndpointsState,
+    context: &mut crate::tui::app::AppContext<D>,
+    key: KeyEvent,
+) -> Result<()> {
     match key.code {
-        KeyCode::Up => app.endpoints_state.previous(),
-        KeyCode::Down => app.endpoints_state.next(),
+        KeyCode::Up => state.previous(),
+        KeyCode::Down => state.next(),
         KeyCode::Char('n') => {
-            app.endpoints_state.mode = EndpointsMode::Creating(ConfigBuilder::new());
+            state.mode = EndpointsMode::Creating(ConfigBuilder::new());
         }
         KeyCode::Char('e') => {
-            if !app.endpoints_state.endpoints.is_empty() {
-                let endpoint = app.endpoints_state.endpoints[app.endpoints_state.selected].clone();
+            if !state.endpoints.is_empty() {
+                let endpoint = state.endpoints[state.selected].clone();
                 match ConfigBuilder::from_existing(endpoint.kind.clone(), &endpoint.config_json, endpoint.note.clone()) {
                     Ok(builder) => {
-                        app.endpoints_state.mode = EndpointsMode::Editing {
+                        state.mode = EndpointsMode::Editing {
                             endpoint_id: endpoint.id,
                             builder,
                         };
                     }
                     Err(e) => {
-                        app.messages.set_error(format!("Failed to load config: {}", e));
+                        context.messages.set_error(format!("Failed to load config: {}", e));
                     }
                 }
             }
         }
         KeyCode::Char('d') => {
-            if !app.endpoints_state.endpoints.is_empty() {
-                let endpoint = app.endpoints_state.endpoints[app.endpoints_state.selected].clone();
+            if !state.endpoints.is_empty() {
+                let endpoint = state.endpoints[state.selected].clone();
                 let kind_str = endpoint.kind.as_str();
-                app.endpoints_state.mode = EndpointsMode::ConfirmDelete {
+                state.mode = EndpointsMode::ConfirmDelete {
                     endpoint_id: endpoint.id,
                     endpoint_desc: format!("{} (ID: {})", kind_str, endpoint.id),
                 };
             }
         }
         KeyCode::Char(' ') => {
-            if !app.endpoints_state.endpoints.is_empty() {
-                let endpoint_id = app.endpoints_state.endpoints[app.endpoints_state.selected].id;
-                match app.db.toggle_endpoint_active(endpoint_id).await {
+            if !state.endpoints.is_empty() {
+                let endpoint_id = state.endpoints[state.selected].id;
+                match context.db.toggle_endpoint_active(endpoint_id).await {
                     Ok(_new_status) => {
-                        load_endpoints(app).await?;
+                        load_endpoints(state, context).await?;
                         // Silently update the list - no success message needed
                     }
                     Err(e) => {
-                        app.messages.set_error(format!("Failed to toggle: {}", e));
+                        context.messages.set_error(format!("Failed to toggle: {}", e));
                     }
                 }
             }
         }
         KeyCode::Enter => {
-            if !app.endpoints_state.endpoints.is_empty() {
-                let endpoint = app.endpoints_state.endpoints[app.endpoints_state.selected].clone();
-                app.endpoints_state.mode = EndpointsMode::Viewing { endpoint };
+            if !state.endpoints.is_empty() {
+                let endpoint = state.endpoints[state.selected].clone();
+                state.mode = EndpointsMode::Viewing { endpoint };
             }
         }
         KeyCode::Esc => {
-            app.current_screen = Screen::MainMenu;
+            context.current_screen = Screen::MainMenu;
         }
         _ => {}
     }
     Ok(())
 }
 
-async fn handle_creating_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEvent, builder: &ConfigBuilder) -> Result<()> {
+async fn handle_creating_mode<D: DatabaseService>(
+    state: &mut EndpointsState,
+    context: &mut crate::tui::app::AppContext<D>,
+    key: KeyEvent,
+    builder: &ConfigBuilder,
+) -> Result<()> {
     let mut new_builder = builder.clone();
 
     match new_builder.handle_input(key)? {
@@ -328,28 +316,28 @@ async fn handle_creating_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEven
                 Ok(json) => {
                     let kind_str = new_builder.endpoint_type.as_str();
                     let note = new_builder.get_note();
-                    match app.db.create_endpoint(kind_str, &json, note).await {
+                    match context.db.create_endpoint(kind_str, &json, note).await {
                         Ok(_) => {
-                            load_endpoints(app).await?;
-                            app.endpoints_state.mode = EndpointsMode::List;
+                            load_endpoints(state, context).await?;
+                            state.mode = EndpointsMode::List;
                         }
                         Err(e) => {
-                            app.messages.set_error(format!("Failed to create endpoint: {}", e));
-                            app.endpoints_state.mode = EndpointsMode::List;
+                            context.messages.set_error(format!("Failed to create endpoint: {}", e));
+                            state.mode = EndpointsMode::List;
                         }
                     }
                 }
                 Err(e) => {
-                    app.messages.set_error(format!("Validation error: {}", e));
-                    app.endpoints_state.mode = EndpointsMode::List;
+                    context.messages.set_error(format!("Validation error: {}", e));
+                    state.mode = EndpointsMode::List;
                 }
             }
         }
         Some(ConfigAction::Cancel) => {
-            app.endpoints_state.mode = EndpointsMode::List;
+            state.mode = EndpointsMode::List;
         }
         None => {
-            app.endpoints_state.mode = EndpointsMode::Creating(new_builder);
+            state.mode = EndpointsMode::Creating(new_builder);
         }
     }
 
@@ -357,7 +345,8 @@ async fn handle_creating_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEven
 }
 
 async fn handle_editing_mode<D: DatabaseService>(
-    app: &mut App<D>,
+    state: &mut EndpointsState,
+    context: &mut crate::tui::app::AppContext<D>,
     key: KeyEvent,
     endpoint_id: i64,
     builder: &ConfigBuilder,
@@ -369,28 +358,28 @@ async fn handle_editing_mode<D: DatabaseService>(
             match new_builder.build_json() {
                 Ok(json) => {
                     let note = new_builder.get_note();
-                    match app.db.update_endpoint(endpoint_id, &json, note).await {
+                    match context.db.update_endpoint(endpoint_id, &json, note).await {
                         Ok(_) => {
-                            load_endpoints(app).await?;
-                            app.endpoints_state.mode = EndpointsMode::List;
+                            load_endpoints(state, context).await?;
+                            state.mode = EndpointsMode::List;
                         }
                         Err(e) => {
-                            app.messages.set_error(format!("Failed to update endpoint: {}", e));
-                            app.endpoints_state.mode = EndpointsMode::List;
+                            context.messages.set_error(format!("Failed to update endpoint: {}", e));
+                            state.mode = EndpointsMode::List;
                         }
                     }
                 }
                 Err(e) => {
-                    app.messages.set_error(format!("Validation error: {}", e));
-                    app.endpoints_state.mode = EndpointsMode::List;
+                    context.messages.set_error(format!("Validation error: {}", e));
+                    state.mode = EndpointsMode::List;
                 }
             }
         }
         Some(ConfigAction::Cancel) => {
-            app.endpoints_state.mode = EndpointsMode::List;
+            state.mode = EndpointsMode::List;
         }
         None => {
-            app.endpoints_state.mode = EndpointsMode::Editing {
+            state.mode = EndpointsMode::Editing {
                 endpoint_id,
                 builder: new_builder,
             };
@@ -400,34 +389,92 @@ async fn handle_editing_mode<D: DatabaseService>(
     Ok(())
 }
 
-async fn handle_viewing_mode<D: DatabaseService>(app: &mut App<D>, _key: KeyEvent) -> Result<()> {
-    app.endpoints_state.mode = EndpointsMode::List;
+async fn handle_viewing_mode<D: DatabaseService>(
+    state: &mut EndpointsState,
+    _context: &mut crate::tui::app::AppContext<D>,
+    _key: KeyEvent,
+) -> Result<()> {
+    state.mode = EndpointsMode::List;
     Ok(())
 }
 
 async fn handle_confirm_delete_mode<D: DatabaseService>(
-    app: &mut App<D>,
+    state: &mut EndpointsState,
+    context: &mut crate::tui::app::AppContext<D>,
     key: KeyEvent,
     endpoint_id: i64,
     _endpoint_desc: &str,
 ) -> Result<()> {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
-            match app.db.delete_endpoint(endpoint_id).await {
+            match context.db.delete_endpoint(endpoint_id).await {
                 Ok(_) => {
-                    load_endpoints(app).await?;
-                    app.endpoints_state.mode = EndpointsMode::List;
+                    load_endpoints(state, context).await?;
+                    state.mode = EndpointsMode::List;
                 }
                 Err(e) => {
-                    app.messages.set_error(format!("Failed to delete: {}", e));
-                    app.endpoints_state.mode = EndpointsMode::List;
+                    context.messages.set_error(format!("Failed to delete: {}", e));
+                    state.mode = EndpointsMode::List;
                 }
             }
         }
         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-            app.endpoints_state.mode = EndpointsMode::List;
+            state.mode = EndpointsMode::List;
         }
         _ => {}
     }
     Ok(())
+}
+
+#[async_trait]
+impl<D: DatabaseService> ScreenTrait<D> for EndpointsState {
+    fn render(&self, frame: &mut Frame, app: &App<D>) {
+        super::endpoints::render(frame, app)
+    }
+
+    async fn handle_key(&mut self, context: &mut crate::tui::app::AppContext<D>, key: KeyEvent) -> Result<ScreenTransition> {
+        // Clear messages on any key if shown
+        if context.messages.has_message() {
+            context.messages.clear();
+            return Ok(ScreenTransition::Stay);
+        }
+
+        let prev_screen = context.current_screen.clone();
+
+        match &self.mode.clone() {
+            EndpointsMode::List => handle_list_mode(self, context, key).await?,
+            EndpointsMode::Creating(builder) => handle_creating_mode(self, context, key, builder).await?,
+            EndpointsMode::Editing {
+                endpoint_id,
+                builder,
+            } => handle_editing_mode(self, context, key, *endpoint_id, builder).await?,
+            EndpointsMode::Viewing { .. } => handle_viewing_mode(self, context, key).await?,
+            EndpointsMode::ConfirmDelete {
+                endpoint_id,
+                endpoint_desc,
+            } => handle_confirm_delete_mode(self, context, key, *endpoint_id, endpoint_desc).await?,
+        }
+
+        // Check if screen changed
+        if context.current_screen != prev_screen {
+            let screen_id = match context.current_screen {
+                Screen::MainMenu => ScreenId::MainMenu,
+                Screen::Subscriptions => ScreenId::Subscriptions,
+                Screen::Endpoints => ScreenId::Endpoints,
+                Screen::TestNotification => ScreenId::TestNotification,
+                Screen::Logs => ScreenId::Logs,
+            };
+            return Ok(ScreenTransition::GoTo(screen_id));
+        }
+
+        Ok(ScreenTransition::Stay)
+    }
+
+    async fn on_enter(&mut self, context: &mut crate::tui::app::AppContext<D>) -> Result<()> {
+        super::endpoints::load_endpoints(self, context).await
+    }
+
+    fn id(&self) -> ScreenId {
+        ScreenId::Endpoints
+    }
 }
