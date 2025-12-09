@@ -30,24 +30,24 @@ mod navigation_tests {
         let mut app = App::new(db).expect("Failed to create app");
 
         // Start at main menu
-        assert_eq!(app.current_screen, Screen::MainMenu);
+        assert_eq!(app.context.current_screen, Screen::MainMenu);
 
         // Navigate to first menu item (Manage Subscriptions)
-        app.main_menu_state.set_selected(0);
+        app.states.main_menu_state.set_selected(0);
 
         // Press Enter to go to subscriptions
         app.handle_key(key(KeyCode::Enter))
             .await
             .expect("Failed to handle key");
 
-        assert_eq!(app.current_screen, Screen::Subscriptions);
+        assert_eq!(app.context.current_screen, Screen::Subscriptions);
 
         // Press Esc to go back
         app.handle_key(key(KeyCode::Esc))
             .await
             .expect("Failed to handle key");
 
-        assert_eq!(app.current_screen, Screen::MainMenu);
+        assert_eq!(app.context.current_screen, Screen::MainMenu);
     }
 
     #[tokio::test]
@@ -56,19 +56,19 @@ mod navigation_tests {
         let mut app = App::new(db).expect("Failed to create app");
 
         // Navigate to Manage Endpoints (second item)
-        app.main_menu_state.set_selected(1);
+        app.states.main_menu_state.set_selected(1);
 
         app.handle_key(key(KeyCode::Enter))
             .await
             .expect("Failed to handle key");
 
-        assert_eq!(app.current_screen, Screen::Endpoints);
+        assert_eq!(app.context.current_screen, Screen::Endpoints);
 
         app.handle_key(key(KeyCode::Esc))
             .await
             .expect("Failed to handle key");
 
-        assert_eq!(app.current_screen, Screen::MainMenu);
+        assert_eq!(app.context.current_screen, Screen::MainMenu);
     }
 
     #[tokio::test]
@@ -77,19 +77,19 @@ mod navigation_tests {
         let mut app = App::new(db).expect("Failed to create app");
 
         // Navigate to Test Notification (third item)
-        app.main_menu_state.set_selected(2);
+        app.states.main_menu_state.set_selected(2);
 
         app.handle_key(key(KeyCode::Enter))
             .await
             .expect("Failed to handle key");
 
-        assert_eq!(app.current_screen, Screen::TestNotification);
+        assert_eq!(app.context.current_screen, Screen::TestNotification);
 
         app.handle_key(key(KeyCode::Esc))
             .await
             .expect("Failed to handle key");
 
-        assert_eq!(app.current_screen, Screen::MainMenu);
+        assert_eq!(app.context.current_screen, Screen::MainMenu);
     }
 
     #[tokio::test]
@@ -98,19 +98,19 @@ mod navigation_tests {
         let mut app = App::new(db).expect("Failed to create app");
 
         // Navigate to View Logs (fourth item)
-        app.main_menu_state.set_selected(3);
+        app.states.main_menu_state.set_selected(3);
 
         app.handle_key(key(KeyCode::Enter))
             .await
             .expect("Failed to handle key");
 
-        assert_eq!(app.current_screen, Screen::Logs);
+        assert_eq!(app.context.current_screen, Screen::Logs);
 
         app.handle_key(key(KeyCode::Esc))
             .await
             .expect("Failed to handle key");
 
-        assert_eq!(app.current_screen, Screen::MainMenu);
+        assert_eq!(app.context.current_screen, Screen::MainMenu);
     }
 
     #[tokio::test]
@@ -118,14 +118,14 @@ mod navigation_tests {
         let db = create_test_db();
         let mut app = App::new(db).expect("Failed to create app");
 
-        assert!(!app.should_quit);
+        assert!(!app.context.should_quit);
 
         // Press 'q' at main menu
         app.handle_key(key(KeyCode::Char('q')))
             .await
             .expect("Failed to handle key");
 
-        assert!(app.should_quit);
+        assert!(app.context.should_quit);
     }
 
     #[tokio::test]
@@ -134,13 +134,13 @@ mod navigation_tests {
         let mut app = App::new(db).expect("Failed to create app");
 
         // Navigate to Quit (fifth item)
-        app.main_menu_state.set_selected(4);
+        app.states.main_menu_state.set_selected(4);
 
         app.handle_key(key(KeyCode::Enter))
             .await
             .expect("Failed to handle key");
 
-        assert!(app.should_quit);
+        assert!(app.context.should_quit);
     }
 
     #[tokio::test]
@@ -149,15 +149,15 @@ mod navigation_tests {
         let mut app = App::new(db).expect("Failed to create app");
 
         // Start at first item
-        assert_eq!(app.main_menu_state.selected(), 0);
+        assert_eq!(app.states.main_menu_state.selected(), 0);
 
         // Go up should wrap to last item
-        app.main_menu_state.previous();
-        assert_eq!(app.main_menu_state.selected(), 4);
+        app.states.main_menu_state.previous();
+        assert_eq!(app.states.main_menu_state.selected(), 4);
 
         // Go down should wrap to first item
-        app.main_menu_state.next();
-        assert_eq!(app.main_menu_state.selected(), 0);
+        app.states.main_menu_state.next();
+        assert_eq!(app.states.main_menu_state.selected(), 0);
     }
 
     #[tokio::test]
@@ -166,18 +166,18 @@ mod navigation_tests {
         let mut app = App::new(db).expect("Failed to create app");
 
         // Set an error message
-        app.messages.set_error("Test error".to_string());
-        assert!(app.messages.has_message());
+        app.context.messages.set_error("Test error".to_string());
+        assert!(app.context.messages.has_message());
 
         // Go to subscriptions screen
-        app.current_screen = Screen::Subscriptions;
+        app.goto_screen(Screen::Subscriptions);
 
         // Any key should clear the message
         app.handle_key(key(KeyCode::Char('x')))
             .await
             .expect("Failed to handle key");
 
-        assert!(!app.messages.has_message());
+        assert!(!app.context.messages.has_message());
     }
 
     #[tokio::test]
@@ -185,14 +185,14 @@ mod navigation_tests {
         let db = create_test_db();
         let app = App::new(db).expect("Failed to create app");
 
-        assert_eq!(app.subscriptions_state.mode, SubscriptionsMode::List);
+        assert_eq!(app.states.subscriptions_state.mode, SubscriptionsMode::List);
     }
 
     #[tokio::test]
     async fn test_subscriptions_create_mode_entry() {
         let db = create_test_db();
         let mut app = App::new(db).expect("Failed to create app");
-        app.current_screen = Screen::Subscriptions;
+        app.goto_screen(Screen::Subscriptions);
 
         // Press 'n' to enter create mode
         app.handle_key(key(KeyCode::Char('n')))
@@ -200,7 +200,7 @@ mod navigation_tests {
             .expect("Failed to handle key");
 
         assert!(matches!(
-            app.subscriptions_state.mode,
+            app.states.subscriptions_state.mode,
             SubscriptionsMode::Creating(_)
         ));
 
@@ -209,14 +209,14 @@ mod navigation_tests {
             .await
             .expect("Failed to handle key");
 
-        assert_eq!(app.subscriptions_state.mode, SubscriptionsMode::List);
+        assert_eq!(app.states.subscriptions_state.mode, SubscriptionsMode::List);
     }
 
     #[tokio::test]
     async fn test_subscriptions_creating_accepts_valid_chars() {
         let db = create_test_db();
         let mut app = App::new(db).expect("Failed to create app");
-        app.current_screen = Screen::Subscriptions;
+        app.goto_screen(Screen::Subscriptions);
 
         // Enter create mode
         app.handle_key(key(KeyCode::Char('n')))
@@ -238,7 +238,7 @@ mod navigation_tests {
             .expect("Failed to handle key");
 
         // Check the input buffer
-        if let SubscriptionsMode::Creating(input) = &app.subscriptions_state.mode {
+        if let SubscriptionsMode::Creating(input) = &app.states.subscriptions_state.mode {
             assert_eq!(input, "test");
         } else {
             panic!("Expected Creating mode");
@@ -249,7 +249,7 @@ mod navigation_tests {
             .await
             .expect("Failed to handle key");
 
-        if let SubscriptionsMode::Creating(input) = &app.subscriptions_state.mode {
+        if let SubscriptionsMode::Creating(input) = &app.states.subscriptions_state.mode {
             assert_eq!(input, "tes");
         } else {
             panic!("Expected Creating mode");
@@ -261,14 +261,14 @@ mod navigation_tests {
         let db = create_test_db();
         let app = App::new(db).expect("Failed to create app");
 
-        assert!(matches!(app.endpoints_state.mode, EndpointsMode::List));
+        assert!(matches!(app.states.endpoints_state.mode, EndpointsMode::List));
     }
 
     #[tokio::test]
     async fn test_endpoints_create_mode_entry() {
         let db = create_test_db();
         let mut app = App::new(db).expect("Failed to create app");
-        app.current_screen = Screen::Endpoints;
+        app.goto_screen(Screen::Endpoints);
 
         // Press 'n' to enter create mode
         app.handle_key(key(KeyCode::Char('n')))
@@ -276,7 +276,7 @@ mod navigation_tests {
             .expect("Failed to handle key");
 
         assert!(matches!(
-            app.endpoints_state.mode,
+            app.states.endpoints_state.mode,
             EndpointsMode::Creating(_)
         ));
 
@@ -285,7 +285,7 @@ mod navigation_tests {
             .await
             .expect("Failed to handle key");
 
-        assert!(matches!(app.endpoints_state.mode, EndpointsMode::List));
+        assert!(matches!(app.states.endpoints_state.mode, EndpointsMode::List));
     }
 
     #[tokio::test]
@@ -294,16 +294,16 @@ mod navigation_tests {
         let mut app = App::new(db).expect("Failed to create app");
 
         // Navigate to second item in main menu
-        app.main_menu_state.next();
-        app.main_menu_state.next();
-        assert_eq!(app.main_menu_state.selected(), 2);
+        app.states.main_menu_state.next();
+        app.states.main_menu_state.next();
+        assert_eq!(app.states.main_menu_state.selected(), 2);
 
         // Go to another screen and back
-        app.current_screen = Screen::Subscriptions;
-        app.current_screen = Screen::MainMenu;
+        app.goto_screen(Screen::Subscriptions);
+        app.goto_screen(Screen::MainMenu);
 
         // State should be preserved
-        assert_eq!(app.main_menu_state.selected(), 2);
+        assert_eq!(app.states.main_menu_state.selected(), 2);
     }
 
     #[tokio::test]
@@ -312,8 +312,8 @@ mod navigation_tests {
         let app = App::new(db).expect("Failed to create app");
 
         // Test Navigable trait methods
-        assert_eq!(app.subscriptions_state.selected(), 0);
-        assert!(app.subscriptions_state.is_empty());
+        assert_eq!(app.states.subscriptions_state.selected(), 0);
+        assert!(app.states.subscriptions_state.is_empty());
     }
 
     #[tokio::test]
@@ -321,8 +321,8 @@ mod navigation_tests {
         let db = create_test_db();
         let app = App::new(db).expect("Failed to create app");
 
-        assert_eq!(app.endpoints_state.selected(), 0);
-        assert!(app.endpoints_state.is_empty());
+        assert_eq!(app.states.endpoints_state.selected(), 0);
+        assert!(app.states.endpoints_state.is_empty());
     }
 
     #[tokio::test]
@@ -330,8 +330,8 @@ mod navigation_tests {
         let db = create_test_db();
         let app = App::new(db).expect("Failed to create app");
 
-        assert_eq!(app.test_notification_state.selected(), 0);
-        assert!(app.test_notification_state.is_empty());
+        assert_eq!(app.states.test_notification_state.selected(), 0);
+        assert!(app.states.test_notification_state.is_empty());
     }
 
     #[tokio::test]
@@ -340,19 +340,19 @@ mod navigation_tests {
         let mut app = App::new(db).expect("Failed to create app");
 
         // Initially no message
-        assert!(!app.messages.has_message());
+        assert!(!app.context.messages.has_message());
 
         // Set error
-        app.messages.set_error("Error message".to_string());
-        assert!(app.messages.has_message());
+        app.context.messages.set_error("Error message".to_string());
+        assert!(app.context.messages.has_message());
 
         // Success should clear error
-        app.messages.set_success("Success message".to_string());
-        assert!(app.messages.has_message());
+        app.context.messages.set_success("Success message".to_string());
+        assert!(app.context.messages.has_message());
 
         // Clear should remove message
-        app.messages.clear();
-        assert!(!app.messages.has_message());
+        app.context.messages.clear();
+        assert!(!app.context.messages.has_message());
     }
 
     #[tokio::test]
@@ -361,56 +361,56 @@ mod navigation_tests {
         let mut app = App::new(db).expect("Failed to create app");
 
         // MainMenu -> Subscriptions
-        app.main_menu_state.set_selected(0);
+        app.states.main_menu_state.set_selected(0);
         app.handle_key(key(KeyCode::Enter))
             .await
             .expect("Failed to handle key");
-        assert_eq!(app.current_screen, Screen::Subscriptions);
+        assert_eq!(app.context.current_screen, Screen::Subscriptions);
 
         // Subscriptions -> MainMenu
         app.handle_key(key(KeyCode::Esc))
             .await
             .expect("Failed to handle key");
-        assert_eq!(app.current_screen, Screen::MainMenu);
+        assert_eq!(app.context.current_screen, Screen::MainMenu);
 
         // MainMenu -> Endpoints
-        app.main_menu_state.set_selected(1);
+        app.states.main_menu_state.set_selected(1);
         app.handle_key(key(KeyCode::Enter))
             .await
             .expect("Failed to handle key");
-        assert_eq!(app.current_screen, Screen::Endpoints);
+        assert_eq!(app.context.current_screen, Screen::Endpoints);
 
         // Endpoints -> MainMenu
         app.handle_key(key(KeyCode::Esc))
             .await
             .expect("Failed to handle key");
-        assert_eq!(app.current_screen, Screen::MainMenu);
+        assert_eq!(app.context.current_screen, Screen::MainMenu);
 
         // MainMenu -> TestNotification
-        app.main_menu_state.set_selected(2);
+        app.states.main_menu_state.set_selected(2);
         app.handle_key(key(KeyCode::Enter))
             .await
             .expect("Failed to handle key");
-        assert_eq!(app.current_screen, Screen::TestNotification);
+        assert_eq!(app.context.current_screen, Screen::TestNotification);
 
         // TestNotification -> MainMenu
         app.handle_key(key(KeyCode::Esc))
             .await
             .expect("Failed to handle key");
-        assert_eq!(app.current_screen, Screen::MainMenu);
+        assert_eq!(app.context.current_screen, Screen::MainMenu);
 
         // MainMenu -> Logs
-        app.main_menu_state.set_selected(3);
+        app.states.main_menu_state.set_selected(3);
         app.handle_key(key(KeyCode::Enter))
             .await
             .expect("Failed to handle key");
-        assert_eq!(app.current_screen, Screen::Logs);
+        assert_eq!(app.context.current_screen, Screen::Logs);
 
         // Logs -> MainMenu
         app.handle_key(key(KeyCode::Esc))
             .await
             .expect("Failed to handle key");
-        assert_eq!(app.current_screen, Screen::MainMenu);
+        assert_eq!(app.context.current_screen, Screen::MainMenu);
     }
 
     #[tokio::test]
@@ -419,25 +419,25 @@ mod navigation_tests {
         let mut app = App::new(db).expect("Failed to create app");
 
         // 'q' on subscriptions screen shouldn't quit
-        app.current_screen = Screen::Subscriptions;
+        app.goto_screen(Screen::Subscriptions);
         app.handle_key(key(KeyCode::Char('q')))
             .await
             .expect("Failed to handle key");
-        assert!(!app.should_quit);
+        assert!(!app.context.should_quit);
 
         // 'q' on endpoints screen shouldn't quit
-        app.current_screen = Screen::Endpoints;
+        app.goto_screen(Screen::Endpoints);
         app.handle_key(key(KeyCode::Char('q')))
             .await
             .expect("Failed to handle key");
-        assert!(!app.should_quit);
+        assert!(!app.context.should_quit);
 
         // 'q' on main menu SHOULD quit
-        app.current_screen = Screen::MainMenu;
+        app.goto_screen(Screen::MainMenu);
         app.handle_key(key(KeyCode::Char('q')))
             .await
             .expect("Failed to handle key");
-        assert!(app.should_quit);
+        assert!(app.context.should_quit);
     }
 
     #[tokio::test]
@@ -446,12 +446,12 @@ mod navigation_tests {
         let app = App::new(db).expect("Failed to create app");
 
         // Verify initial state
-        assert_eq!(app.current_screen, Screen::MainMenu);
-        assert!(!app.should_quit);
-        assert!(!app.messages.has_message());
-        assert_eq!(app.main_menu_state.selected(), 0);
-        assert_eq!(app.subscriptions_state.selected(), 0);
-        assert_eq!(app.endpoints_state.selected(), 0);
-        assert_eq!(app.test_notification_state.selected(), 0);
+        assert_eq!(app.context.current_screen, Screen::MainMenu);
+        assert!(!app.context.should_quit);
+        assert!(!app.context.messages.has_message());
+        assert_eq!(app.states.main_menu_state.selected(), 0);
+        assert_eq!(app.states.subscriptions_state.selected(), 0);
+        assert_eq!(app.states.endpoints_state.selected(), 0);
+        assert_eq!(app.states.test_notification_state.selected(), 0);
     }
 }

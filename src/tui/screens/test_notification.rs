@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Alignment, Constraint, Layout},
@@ -11,7 +12,8 @@ use ratatui::{
 use crate::models::database::EndpointRow;
 use crate::notifiers;
 use crate::services::DatabaseService;
-use crate::tui::app::{App, Screen};
+use crate::tui::app::App;
+use crate::tui::screen_trait::{Screen as ScreenTrait, ScreenId, ScreenTransition};
 use crate::tui::state::Navigable;
 use crate::tui::widgets::common;
 
@@ -59,18 +61,21 @@ impl Navigable for TestNotificationState {
     }
 }
 
-pub async fn load_endpoints<D: DatabaseService>(app: &mut App<D>) -> Result<()> {
-    let all_endpoints = app.db.list_endpoints().await?;
+pub async fn load_endpoints<D: DatabaseService>(
+    state: &mut TestNotificationState,
+    context: &mut crate::tui::app::AppContext<D>,
+) -> Result<()> {
+    let all_endpoints = context.db.list_endpoints().await?;
     // Filter to only active endpoints
     let active_endpoints: Vec<EndpointRow> = all_endpoints
         .into_iter()
         .filter(|e| e.active)
         .collect();
-    app.test_notification_state.endpoints = active_endpoints;
-    if app.test_notification_state.selected >= app.test_notification_state.endpoints.len()
-        && !app.test_notification_state.endpoints.is_empty()
+    state.endpoints = active_endpoints;
+    if state.selected >= state.endpoints.len()
+        && !state.endpoints.is_empty()
     {
-        app.test_notification_state.selected = app.test_notification_state.endpoints.len() - 1;
+        state.selected = state.endpoints.len() - 1;
     }
     Ok(())
 }
@@ -98,19 +103,20 @@ pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     frame.render_widget(title, chunks[0]);
 
     // Endpoint list
-    if app.test_notification_state.endpoints.is_empty() {
+    if app.states.test_notification_state.endpoints.is_empty() {
         let empty = Paragraph::new("No active endpoints available. Create and activate an endpoint first.")
             .alignment(Alignment::Center)
             .block(Block::default().borders(Borders::ALL).title("Select Endpoint"));
         frame.render_widget(empty, chunks[1]);
     } else {
         let items: Vec<ListItem> = app
+            .states
             .test_notification_state
             .endpoints
             .iter()
             .enumerate()
             .map(|(i, endpoint)| {
-                let is_selected = i == app.test_notification_state.selected;
+                let is_selected = i == app.states.test_notification_state.selected;
                 let (prefix, style) = common::selection_style(is_selected);
                 let kind_str = endpoint.kind.as_str();
 
@@ -168,7 +174,7 @@ pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     frame.render_widget(test_message, chunks[2]);
 
     // Status
-    let (status_text, status_color) = match &app.test_notification_state.status {
+    let (status_text, status_color) = match &app.states.test_notification_state.status {
         TestStatus::Ready => ("Status: Ready to send test notification".to_string(), Color::White),
         TestStatus::Sending => ("Status: Sending...".to_string(), Color::Yellow),
         TestStatus::Success(msg) => (format!("Status: ✓ {}", msg), Color::Green),
@@ -192,27 +198,13 @@ pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     frame.render_widget(help, chunks[4]);
 }
 
-pub async fn handle_key<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
-    match key.code {
-        KeyCode::Up => app.test_notification_state.previous(),
-        KeyCode::Down => app.test_notification_state.next(),
-        KeyCode::Enter => {
-            if !app.test_notification_state.endpoints.is_empty() {
-                send_test_notification(app).await?;
-            }
-        }
-        KeyCode::Esc => {
-            app.current_screen = Screen::MainMenu;
-        }
-        _ => {}
-    }
-    Ok(())
-}
+async fn send_test_notification<D: DatabaseService>(
+    state: &mut TestNotificationState,
+    _context: &mut crate::tui::app::AppContext<D>,
+) -> Result<()> {
+    state.status = TestStatus::Sending;
 
-async fn send_test_notification<D: DatabaseService>(app: &mut App<D>) -> Result<()> {
-    app.test_notification_state.status = TestStatus::Sending;
-
-    let endpoint = app.test_notification_state.endpoints[app.test_notification_state.selected].clone();
+    let endpoint = state.endpoints[state.selected].clone();
 
     // Create HTTP client
     let client = reqwest::Client::builder()
@@ -223,7 +215,7 @@ async fn send_test_notification<D: DatabaseService>(app: &mut App<D>) -> Result<
     let notifier = match notifiers::build_notifier(&endpoint, client) {
         Ok(n) => n,
         Err(e) => {
-            app.test_notification_state.status =
+            state.status =
                 TestStatus::Error(format!("Failed to build notifier: {}", e));
             return Ok(());
         }
@@ -240,13 +232,46 @@ async fn send_test_notification<D: DatabaseService>(app: &mut App<D>) -> Result<
     {
         Ok(_) => {
             let kind_str = notifier.kind();
-            app.test_notification_state.status =
+            state.status =
                 TestStatus::Success(format!("Successfully sent test to {} endpoint!", kind_str));
         }
         Err(e) => {
-            app.test_notification_state.status = TestStatus::Error(format!("Send failed: {}", e));
+            state.status = TestStatus::Error(format!("Send failed: {}", e));
         }
     }
 
     Ok(())
+}
+
+#[async_trait]
+impl<D: DatabaseService> ScreenTrait<D> for TestNotificationState {
+    fn render(&self, frame: &mut Frame, app: &App<D>) {
+        super::test_notification::render(frame, app)
+    }
+
+    async fn handle_key(&mut self, context: &mut crate::tui::app::AppContext<D>, key: KeyEvent) -> Result<ScreenTransition> {
+        match key.code {
+            KeyCode::Up => self.previous(),
+            KeyCode::Down => self.next(),
+            KeyCode::Enter => {
+                if !self.endpoints.is_empty() {
+                    send_test_notification(self, context).await?;
+                }
+            }
+            KeyCode::Esc => {
+                return Ok(ScreenTransition::GoTo(ScreenId::MainMenu));
+            }
+            _ => {}
+        }
+
+        Ok(ScreenTransition::Stay)
+    }
+
+    async fn on_enter(&mut self, context: &mut crate::tui::app::AppContext<D>) -> Result<()> {
+        super::test_notification::load_endpoints(self, context).await
+    }
+
+    fn id(&self) -> ScreenId {
+        ScreenId::TestNotification
+    }
 }
