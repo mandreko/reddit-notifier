@@ -15,7 +15,7 @@ use crate::tui::app::{App, Screen};
 use crate::tui::screen_trait::{Screen as ScreenTrait, ScreenId, ScreenTransition};
 use crate::tui::state::Navigable;
 use crate::tui::widgets::common;
-use crate::tui::widgets::{ConfigAction, ConfigBuilder};
+use crate::tui::widgets::{ConfigAction, ConfigBuilder, ModalDialog};
 
 #[derive(Debug, Clone)]
 pub enum EndpointsMode {
@@ -98,7 +98,8 @@ pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
         EndpointsMode::ConfirmDelete { endpoint_desc, .. } => {
             render_list(frame, app, area);
             let prompt = format!("Delete {}?", endpoint_desc);
-            common::render_confirm_dialog(frame, area, &prompt, "Confirm Delete");
+            let dialog = ModalDialog::confirm(prompt);
+            dialog.render(frame, area);
         }
     }
 

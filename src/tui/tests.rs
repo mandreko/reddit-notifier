@@ -239,7 +239,7 @@ mod navigation_tests {
 
         // Check the input buffer
         if let SubscriptionsMode::Creating(input) = &app.states.subscriptions_state.mode {
-            assert_eq!(input, "test");
+            assert_eq!(input.value(), "test");
         } else {
             panic!("Expected Creating mode");
         }
@@ -250,7 +250,7 @@ mod navigation_tests {
             .expect("Failed to handle key");
 
         if let SubscriptionsMode::Creating(input) = &app.states.subscriptions_state.mode {
-            assert_eq!(input, "tes");
+            assert_eq!(input.value(), "tes");
         } else {
             panic!("Expected Creating mode");
         }

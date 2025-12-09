@@ -3,9 +3,9 @@
 //! This module provides a unified way to display error and success messages
 //! across all screens, eliminating duplicate message handling code.
 
-use ratatui::{layout::Rect, style::Color, Frame};
+use ratatui::{layout::Rect, Frame};
 
-use crate::tui::widgets::common;
+use crate::tui::widgets::ModalDialog;
 
 /// Manages error and success messages for the TUI
 ///
@@ -72,9 +72,11 @@ impl MessageDisplay {
     /// * `area` - The full screen area (popup will be centered)
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         if let Some(msg) = &self.error {
-            common::render_message_popup(frame, area, msg, Color::Red, "Error");
+            let dialog = ModalDialog::error(msg.clone());
+            dialog.render(frame, area);
         } else if let Some(msg) = &self.success {
-            common::render_message_popup(frame, area, msg, Color::Green, "Success");
+            let dialog = ModalDialog::success(msg.clone());
+            dialog.render(frame, area);
         }
     }
 }
