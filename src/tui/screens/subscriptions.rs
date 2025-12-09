@@ -8,8 +8,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::database;
 use crate::models::database::{EndpointRow, SubscriptionRow};
+use crate::services::DatabaseService;
 use crate::tui::app::{App, Screen};
 use crate::tui::state::Navigable;
 use crate::tui::widgets::common;
@@ -66,8 +66,8 @@ impl Navigable for SubscriptionsState {
     }
 }
 
-pub async fn load_subscriptions(app: &mut App) -> Result<()> {
-    let subs = database::list_subscriptions(&app.pool).await?;
+pub async fn load_subscriptions<D: DatabaseService>(app: &mut App<D>) -> Result<()> {
+    let subs = app.db.list_subscriptions().await?;
     app.subscriptions_state.subscriptions = subs;
     if app.subscriptions_state.selected >= app.subscriptions_state.subscriptions.len()
         && !app.subscriptions_state.subscriptions.is_empty()
@@ -77,7 +77,7 @@ pub async fn load_subscriptions(app: &mut App) -> Result<()> {
     Ok(())
 }
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     let area = frame.area();
 
     match &app.subscriptions_state.mode {
@@ -100,7 +100,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     app.messages.render(frame, area);
 }
 
-fn render_list(frame: &mut Frame, app: &App, area: Rect) {
+fn render_list<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
@@ -179,7 +179,7 @@ fn render_list(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(help, chunks[2]);
 }
 
-fn render_creating(frame: &mut Frame, _app: &App, area: Rect, input: &str) {
+fn render_creating<D: DatabaseService>(frame: &mut Frame, _app: &App<D>, area: Rect, input: &str) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
@@ -212,9 +212,9 @@ fn render_creating(frame: &mut Frame, _app: &App, area: Rect, input: &str) {
     frame.render_widget(help, chunks[2]);
 }
 
-fn render_managing_endpoints(
+fn render_managing_endpoints<D: DatabaseService>(
     frame: &mut Frame,
-    app: &App,
+    app: &App<D>,
     area: Rect,
     endpoints: &[EndpointRow],
     linked_ids: &[i64],
@@ -283,7 +283,7 @@ fn render_managing_endpoints(
     frame.render_widget(help, chunks[2]);
 }
 
-pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
+pub async fn handle_key<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
     // Clear messages on any key if shown
     if app.messages.has_message() {
         app.messages.clear();
@@ -318,7 +318,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
-async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
+async fn handle_list_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Up => app.subscriptions_state.previous(),
         KeyCode::Down => app.subscriptions_state.next(),
@@ -337,8 +337,8 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Enter => {
             if !app.subscriptions_state.subscriptions.is_empty() {
                 let sub = &app.subscriptions_state.subscriptions[app.subscriptions_state.selected];
-                let all_endpoints = database::list_endpoints(&app.pool).await?;
-                let linked = database::get_subscription_endpoints(&app.pool, sub.id).await?;
+                let all_endpoints = app.db.list_endpoints().await?;
+                let linked = app.db.get_subscription_endpoints(sub.id).await?;
                 let linked_ids: Vec<i64> = linked.iter().map(|e| e.id).collect();
 
                 app.subscriptions_state.mode = SubscriptionsMode::ManagingEndpoints {
@@ -357,7 +357,7 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
-async fn handle_creating_mode(app: &mut App, key: KeyEvent, input: &str) -> Result<()> {
+async fn handle_creating_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEvent, input: &str) -> Result<()> {
     let mut new_input = input.to_string();
 
     match key.code {
@@ -374,7 +374,7 @@ async fn handle_creating_mode(app: &mut App, key: KeyEvent, input: &str) -> Resu
                 app.messages.set_error("Subreddit name cannot be empty".to_string());
                 app.subscriptions_state.mode = SubscriptionsMode::List;
             } else {
-                match database::create_subscription(&app.pool, &new_input).await {
+                match app.db.create_subscription(&new_input).await {
                     Ok(_) => {
                         load_subscriptions(app).await?;
                         app.subscriptions_state.mode = SubscriptionsMode::List;
@@ -394,8 +394,8 @@ async fn handle_creating_mode(app: &mut App, key: KeyEvent, input: &str) -> Resu
     Ok(())
 }
 
-async fn handle_managing_endpoints_mode(
-    app: &mut App,
+async fn handle_managing_endpoints_mode<D: DatabaseService>(
+    app: &mut App<D>,
     key: KeyEvent,
     subscription_id: i64,
     all_endpoints: &[EndpointRow],
@@ -448,7 +448,7 @@ async fn handle_managing_endpoints_mode(
         }
         KeyCode::Enter => {
             // Save changes
-            let original_linked = database::get_subscription_endpoints(&app.pool, subscription_id)
+            let original_linked = app.db.get_subscription_endpoints(subscription_id)
                 .await?
                 .iter()
                 .map(|e| e.id)
@@ -457,7 +457,7 @@ async fn handle_managing_endpoints_mode(
             // Unlink removed endpoints
             for id in original_linked.iter() {
                 if !new_linked.contains(id) {
-                    database::unlink_subscription_endpoint(&app.pool, subscription_id, *id)
+                    app.db.unlink_subscription_endpoint(subscription_id, *id)
                         .await?;
                 }
             }
@@ -465,7 +465,7 @@ async fn handle_managing_endpoints_mode(
             // Link new endpoints
             for id in new_linked.iter() {
                 if !original_linked.contains(id) {
-                    database::link_subscription_endpoint(&app.pool, subscription_id, *id).await?;
+                    app.db.link_subscription_endpoint(subscription_id, *id).await?;
                 }
             }
 
@@ -479,15 +479,15 @@ async fn handle_managing_endpoints_mode(
     Ok(())
 }
 
-async fn handle_confirm_delete_mode(
-    app: &mut App,
+async fn handle_confirm_delete_mode<D: DatabaseService>(
+    app: &mut App<D>,
     key: KeyEvent,
     subscription_id: i64,
     _subreddit_name: &str,
 ) -> Result<()> {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
-            match database::delete_subscription(&app.pool, subscription_id).await {
+            match app.db.delete_subscription(subscription_id).await {
                 Ok(_) => {
                     load_subscriptions(app).await?;
                     app.subscriptions_state.mode = SubscriptionsMode::List;

@@ -1,9 +1,10 @@
 use ratatui::Frame;
 
+use crate::services::DatabaseService;
 use super::app::{App, Screen};
 use super::screens;
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     match app.current_screen {
         Screen::MainMenu => screens::main_menu::render(frame, app),
         Screen::Subscriptions => screens::subscriptions::render(frame, app),

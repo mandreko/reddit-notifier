@@ -8,8 +8,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::database;
 use crate::models::database::EndpointRow;
+use crate::services::DatabaseService;
 use crate::tui::app::{App, Screen};
 use crate::tui::state::Navigable;
 use crate::tui::widgets::common;
@@ -68,8 +68,8 @@ impl Navigable for EndpointsState {
     }
 }
 
-pub async fn load_endpoints(app: &mut App) -> Result<()> {
-    let endpoints = database::list_endpoints(&app.pool).await?;
+pub async fn load_endpoints<D: DatabaseService>(app: &mut App<D>) -> Result<()> {
+    let endpoints = app.db.list_endpoints().await?;
     app.endpoints_state.endpoints = endpoints;
     if app.endpoints_state.selected >= app.endpoints_state.endpoints.len()
         && !app.endpoints_state.endpoints.is_empty()
@@ -79,7 +79,7 @@ pub async fn load_endpoints(app: &mut App) -> Result<()> {
     Ok(())
 }
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     let area = frame.area();
 
     match &app.endpoints_state.mode {
@@ -104,7 +104,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     app.messages.render(frame, area);
 }
 
-fn render_list(frame: &mut Frame, app: &App, area: Rect) {
+fn render_list<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
@@ -190,7 +190,7 @@ fn render_list(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(help, chunks[2]);
 }
 
-fn render_viewing(frame: &mut Frame, _app: &App, area: Rect, endpoint: &EndpointRow) {
+fn render_viewing<D: DatabaseService>(frame: &mut Frame, _app: &App<D>, area: Rect, endpoint: &EndpointRow) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
@@ -234,7 +234,7 @@ fn render_viewing(frame: &mut Frame, _app: &App, area: Rect, endpoint: &Endpoint
     frame.render_widget(help, chunks[2]);
 }
 
-pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
+pub async fn handle_key<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
     // Clear messages on any key if shown
     if app.messages.has_message() {
         app.messages.clear();
@@ -258,7 +258,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
-async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
+async fn handle_list_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Up => app.endpoints_state.previous(),
         KeyCode::Down => app.endpoints_state.next(),
@@ -294,7 +294,7 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char(' ') => {
             if !app.endpoints_state.endpoints.is_empty() {
                 let endpoint_id = app.endpoints_state.endpoints[app.endpoints_state.selected].id;
-                match database::toggle_endpoint_active(&app.pool, endpoint_id).await {
+                match app.db.toggle_endpoint_active(endpoint_id).await {
                     Ok(_new_status) => {
                         load_endpoints(app).await?;
                         // Silently update the list - no success message needed
@@ -319,7 +319,7 @@ async fn handle_list_mode(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
-async fn handle_creating_mode(app: &mut App, key: KeyEvent, builder: &ConfigBuilder) -> Result<()> {
+async fn handle_creating_mode<D: DatabaseService>(app: &mut App<D>, key: KeyEvent, builder: &ConfigBuilder) -> Result<()> {
     let mut new_builder = builder.clone();
 
     match new_builder.handle_input(key)? {
@@ -328,7 +328,7 @@ async fn handle_creating_mode(app: &mut App, key: KeyEvent, builder: &ConfigBuil
                 Ok(json) => {
                     let kind_str = new_builder.endpoint_type.as_str();
                     let note = new_builder.get_note();
-                    match database::create_endpoint(&app.pool, kind_str, &json, note).await {
+                    match app.db.create_endpoint(kind_str, &json, note).await {
                         Ok(_) => {
                             load_endpoints(app).await?;
                             app.endpoints_state.mode = EndpointsMode::List;
@@ -356,8 +356,8 @@ async fn handle_creating_mode(app: &mut App, key: KeyEvent, builder: &ConfigBuil
     Ok(())
 }
 
-async fn handle_editing_mode(
-    app: &mut App,
+async fn handle_editing_mode<D: DatabaseService>(
+    app: &mut App<D>,
     key: KeyEvent,
     endpoint_id: i64,
     builder: &ConfigBuilder,
@@ -369,7 +369,7 @@ async fn handle_editing_mode(
             match new_builder.build_json() {
                 Ok(json) => {
                     let note = new_builder.get_note();
-                    match database::update_endpoint(&app.pool, endpoint_id, &json, note).await {
+                    match app.db.update_endpoint(endpoint_id, &json, note).await {
                         Ok(_) => {
                             load_endpoints(app).await?;
                             app.endpoints_state.mode = EndpointsMode::List;
@@ -400,20 +400,20 @@ async fn handle_editing_mode(
     Ok(())
 }
 
-async fn handle_viewing_mode(app: &mut App, _key: KeyEvent) -> Result<()> {
+async fn handle_viewing_mode<D: DatabaseService>(app: &mut App<D>, _key: KeyEvent) -> Result<()> {
     app.endpoints_state.mode = EndpointsMode::List;
     Ok(())
 }
 
-async fn handle_confirm_delete_mode(
-    app: &mut App,
+async fn handle_confirm_delete_mode<D: DatabaseService>(
+    app: &mut App<D>,
     key: KeyEvent,
     endpoint_id: i64,
     _endpoint_desc: &str,
 ) -> Result<()> {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
-            match database::delete_endpoint(&app.pool, endpoint_id).await {
+            match app.db.delete_endpoint(endpoint_id).await {
                 Ok(_) => {
                     load_endpoints(app).await?;
                     app.endpoints_state.mode = EndpointsMode::List;

@@ -1,9 +1,10 @@
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::DefaultTerminal;
-use sqlx::SqlitePool;
+use std::sync::Arc;
 use std::time::Duration;
 
+use crate::services::DatabaseService;
 use super::screens;
 use super::state::MessageDisplay;
 use super::ui;
@@ -17,8 +18,8 @@ pub enum Screen {
     Logs,
 }
 
-pub struct App {
-    pub pool: SqlitePool,
+pub struct App<D: DatabaseService> {
+    pub db: Arc<D>,
     pub current_screen: Screen,
     pub should_quit: bool,
     pub messages: MessageDisplay,
@@ -29,10 +30,10 @@ pub struct App {
     pub logs_state: screens::LogsState,
 }
 
-impl App {
-    pub fn new(pool: SqlitePool) -> Result<Self> {
+impl<D: DatabaseService> App<D> {
+    pub fn new(db: Arc<D>) -> Result<Self> {
         Ok(Self {
-            pool,
+            db,
             current_screen: Screen::MainMenu,
             should_quit: false,
             messages: MessageDisplay::new(),

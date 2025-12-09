@@ -8,9 +8,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::database;
 use crate::models::database::EndpointRow;
 use crate::notifiers;
+use crate::services::DatabaseService;
 use crate::tui::app::{App, Screen};
 use crate::tui::state::Navigable;
 use crate::tui::widgets::common;
@@ -59,8 +59,8 @@ impl Navigable for TestNotificationState {
     }
 }
 
-pub async fn load_endpoints(app: &mut App) -> Result<()> {
-    let all_endpoints = database::list_endpoints(&app.pool).await?;
+pub async fn load_endpoints<D: DatabaseService>(app: &mut App<D>) -> Result<()> {
+    let all_endpoints = app.db.list_endpoints().await?;
     // Filter to only active endpoints
     let active_endpoints: Vec<EndpointRow> = all_endpoints
         .into_iter()
@@ -75,7 +75,7 @@ pub async fn load_endpoints(app: &mut App) -> Result<()> {
     Ok(())
 }
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     let area = frame.area();
 
     let chunks = Layout::vertical([
@@ -192,7 +192,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(help, chunks[4]);
 }
 
-pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
+pub async fn handle_key<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Up => app.test_notification_state.previous(),
         KeyCode::Down => app.test_notification_state.next(),
@@ -209,7 +209,7 @@ pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
-async fn send_test_notification(app: &mut App) -> Result<()> {
+async fn send_test_notification<D: DatabaseService>(app: &mut App<D>) -> Result<()> {
     app.test_notification_state.status = TestStatus::Sending;
 
     let endpoint = app.test_notification_state.endpoints[app.test_notification_state.selected].clone();

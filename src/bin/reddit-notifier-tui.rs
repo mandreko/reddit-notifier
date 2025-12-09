@@ -2,9 +2,11 @@ use anyhow::Result;
 use dotenvy::dotenv;
 use reddit_notifier::db_connection::{connect_with_retry, ConnectionConfig};
 use reddit_notifier::models::config::AppConfig;
+use reddit_notifier::services::SqliteDatabaseService;
 use reddit_notifier::tui::App;
 use sqlx::sqlite::SqliteConnectOptions;
 use std::str::FromStr;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -45,8 +47,9 @@ async fn main() -> Result<()> {
     let mut terminal = ratatui::init();
     terminal.clear()?;
 
-    // Create and run app
-    let mut app = App::new(pool)?;
+    // Create database service and app
+    let db = Arc::new(SqliteDatabaseService::new(pool));
+    let mut app = App::new(db)?;
     let result = app.run(&mut terminal).await;
 
     // Restore terminal

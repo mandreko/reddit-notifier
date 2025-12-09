@@ -5,6 +5,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::services::DatabaseService;
 use crate::tui::app::{App, Screen};
 use crate::tui::state::Navigable;
 use crate::tui::widgets::common;
@@ -49,7 +50,7 @@ impl Navigable for MainMenuState {
     }
 }
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
     let area = frame.area();
 
     // Create standard 3-section layout using common component
@@ -86,7 +87,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     );
 }
 
-pub async fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
+pub async fn handle_key<D: DatabaseService>(app: &mut App<D>, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Up => app.main_menu_state.previous(),
         KeyCode::Down => app.main_menu_state.next(),
