@@ -4,6 +4,7 @@ pub mod screens;
 pub mod state;
 pub mod state_machine;
 pub mod ui;
+pub mod validation;
 pub mod widgets;
 
 #[cfg(test)]

@@ -320,6 +320,11 @@ async fn handle_creating_mode<D: DatabaseService>(
         Some(ConfigAction::Cancel) => {
             state.mode = EndpointsMode::List;
         }
+        Some(ConfigAction::TestWebhook) => {
+            // Trigger webhook validation
+            new_builder.validate_webhook().await.ok();
+            state.mode = EndpointsMode::Creating(new_builder);
+        }
         None => {
             state.mode = EndpointsMode::Creating(new_builder);
         }
@@ -361,6 +366,14 @@ async fn handle_editing_mode<D: DatabaseService>(
         }
         Some(ConfigAction::Cancel) => {
             state.mode = EndpointsMode::List;
+        }
+        Some(ConfigAction::TestWebhook) => {
+            // Trigger webhook validation
+            new_builder.validate_webhook().await.ok();
+            state.mode = EndpointsMode::Editing {
+                endpoint_id,
+                builder: new_builder,
+            };
         }
         None => {
             state.mode = EndpointsMode::Editing {
