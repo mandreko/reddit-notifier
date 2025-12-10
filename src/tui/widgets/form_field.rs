@@ -6,18 +6,20 @@ use ratatui::{
     widgets::Paragraph,
     Frame,
 };
+use std::sync::Arc;
 
 use super::text_input::TextInput;
+use crate::tui::validation::{AsyncValidator, ValidationResult};
 
 /// A form field widget that combines a label, input, and validation state
 ///
 /// This widget provides:
 /// - Label display
 /// - Integrated TextInput
-/// - Validation state tracking
+/// - Validation state tracking (sync and async)
 /// - Help text support
 /// - Focus management
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FormField {
     /// Field label
     pub label: String,
@@ -36,6 +38,9 @@ pub struct FormField {
 
     /// Optional help text displayed below the field
     pub help_text: Option<String>,
+
+    /// Optional async validator
+    pub async_validator: Option<Arc<dyn AsyncValidator>>,
 }
 
 /// Validation state for a form field
@@ -95,6 +100,7 @@ impl FormField {
             validation_state: ValidationState::Idle,
             is_focused: false,
             help_text: None,
+            async_validator: None,
         }
     }
 
@@ -116,6 +122,12 @@ impl FormField {
         self
     }
 
+    /// Set an async validator for this field
+    pub fn with_async_validator(mut self, validator: Arc<dyn AsyncValidator>) -> Self {
+        self.async_validator = Some(validator);
+        self
+    }
+
     /// Set focus state
     pub fn set_focused(&mut self, focused: bool) {
         self.is_focused = focused;
@@ -130,6 +142,29 @@ impl FormField {
         }
         self.validation_state = ValidationState::Valid(None);
         Ok(())
+    }
+
+    /// Perform asynchronous validation
+    ///
+    /// If an async validator is configured, it will be used.
+    /// Otherwise, falls back to synchronous validation.
+    pub async fn validate_async(&mut self) -> ValidationResult {
+        if let Some(validator) = &self.async_validator {
+            self.validation_state = ValidationState::Validating;
+            match validator.validate(self.input.value()).await {
+                Ok(msg) => {
+                    self.validation_state = ValidationState::Valid(msg.clone());
+                    Ok(msg)
+                }
+                Err(err) => {
+                    self.validation_state = ValidationState::Invalid(err.clone());
+                    Err(err)
+                }
+            }
+        } else {
+            // Fall back to sync validation
+            self.validate_sync().map(|_| None)
+        }
     }
 
     /// Handle keyboard input

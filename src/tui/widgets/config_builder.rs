@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -13,6 +13,7 @@ use crate::models::{
     database::EndpointKind,
     notifiers::{DiscordConfig, PushoverConfig},
 };
+use crate::tui::validation::{AsyncValidator, WebhookValidator, ValidationResult};
 
 #[derive(Debug, Clone)]
 pub struct FormField {
@@ -33,6 +34,42 @@ impl FormField {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum WebhookValidationState {
+    Idle,
+    Validating,
+    Valid(String),
+    Invalid(String),
+}
+
+impl WebhookValidationState {
+    pub fn color(&self) -> Color {
+        match self {
+            Self::Idle => Color::White,
+            Self::Validating => Color::Yellow,
+            Self::Valid(_) => Color::Green,
+            Self::Invalid(_) => Color::Red,
+        }
+    }
+
+    pub fn icon(&self) -> &'static str {
+        match self {
+            Self::Idle => "",
+            Self::Validating => "⋯",
+            Self::Valid(_) => "✓",
+            Self::Invalid(_) => "✗",
+        }
+    }
+
+    pub fn message(&self) -> Option<&str> {
+        match self {
+            Self::Valid(msg) => Some(msg),
+            Self::Invalid(msg) => Some(msg),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ConfigBuilder {
     pub endpoint_type: EndpointKind,
@@ -41,6 +78,7 @@ pub struct ConfigBuilder {
     pub current_field: usize,
     pub type_selection_mode: bool,
     pub editing_note: bool,
+    pub webhook_validation: WebhookValidationState,
 }
 
 impl Default for ConfigBuilder {
@@ -58,6 +96,7 @@ impl ConfigBuilder {
             current_field: 0,
             type_selection_mode: true,
             editing_note: false,
+            webhook_validation: WebhookValidationState::Idle,
         };
         builder.set_type(EndpointKind::Discord);
         builder
@@ -71,6 +110,7 @@ impl ConfigBuilder {
             current_field: 0,
             type_selection_mode: false,
             editing_note: false,
+            webhook_validation: WebhookValidationState::Idle,
         };
 
         builder.set_type(kind);
@@ -118,9 +158,59 @@ impl ConfigBuilder {
         }
     }
 
+    /// Trigger webhook validation asynchronously
+    ///
+    /// This method should be called when the user presses Ctrl+T.
+    /// It returns a ValidationResult that needs to be awaited.
+    pub async fn validate_webhook(&mut self) -> ValidationResult {
+        // Set state to validating
+        self.webhook_validation = WebhookValidationState::Validating;
+
+        let validator = WebhookValidator::new(self.endpoint_type.clone());
+
+        let value_to_validate = match self.endpoint_type {
+            EndpointKind::Discord => {
+                // Discord uses the webhook URL directly
+                self.fields[0].value.trim().to_string()
+            }
+            EndpointKind::Pushover => {
+                // Pushover needs JSON config
+                match self.build_json() {
+                    Ok(json) => json,
+                    Err(e) => {
+                        self.webhook_validation = WebhookValidationState::Invalid(format!("Invalid config: {}", e));
+                        return Err(format!("Invalid config: {}", e));
+                    }
+                }
+            }
+        };
+
+        let result = validator.validate(&value_to_validate).await;
+
+        // Update validation state based on result
+        match &result {
+            Ok(Some(msg)) => {
+                self.webhook_validation = WebhookValidationState::Valid(msg.clone());
+            }
+            Ok(None) => {
+                self.webhook_validation = WebhookValidationState::Valid("Webhook is valid".to_string());
+            }
+            Err(msg) => {
+                self.webhook_validation = WebhookValidationState::Invalid(msg.clone());
+            }
+        }
+
+        result
+    }
+
     pub fn handle_input(&mut self, key: KeyEvent) -> Result<Option<ConfigAction>> {
         if self.type_selection_mode {
             return self.handle_type_selection(key);
+        }
+
+        // Handle Ctrl+T for webhook testing (note: actual validation is async and handled elsewhere)
+        if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Ok(Some(ConfigAction::TestWebhook));
         }
 
         match key.code {
@@ -346,11 +436,19 @@ impl ConfigBuilder {
     }
 
     fn render_form(&self, frame: &mut Frame, area: Rect) {
+        // Add space for validation message if present
+        let validation_height = if self.webhook_validation.message().is_some() {
+            2
+        } else {
+            0
+        };
+
         let chunks = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(4), // Note field
             Constraint::Length((self.fields.len() * 3 + 1) as u16),
             Constraint::Length(6),
+            Constraint::Length(validation_height),
             Constraint::Min(0),
             Constraint::Length(3),
         ])
@@ -432,22 +530,42 @@ impl ConfigBuilder {
             .block(Block::default().borders(Borders::ALL).title("JSON Preview"))
             .style(Style::default().fg(Color::Green));
 
+        // Webhook validation status
+        if let Some(msg) = self.webhook_validation.message() {
+            let icon = self.webhook_validation.icon();
+            let color = self.webhook_validation.color();
+            let validation_widget = Paragraph::new(Line::from(vec![
+                Span::styled(icon, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                Span::raw(" "),
+                Span::styled(msg, Style::default().fg(color)),
+            ]))
+            .alignment(Alignment::Center);
+            frame.render_widget(validation_widget, chunks[4]);
+        }
+
         // Help text
         let help = Paragraph::new(Line::from(vec![
-            "[Tab] Next Field  ".into(),
-            "[Shift+Tab] Previous  ".into(),
+            "[Tab] Next  ".into(),
+            "[Shift+Tab] Prev  ".into(),
+            "[Ctrl+T] Test  ".into(),
             "[Enter] Save  ".into(),
             "[Esc] Cancel".into(),
         ]))
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
 
+        let help_chunk = if validation_height > 0 {
+            chunks[6]
+        } else {
+            chunks[5]
+        };
+
         frame.render_widget(Clear, area);
         frame.render_widget(title, chunks[0]);
         frame.render_widget(note_widget, chunks[1]);
         frame.render_widget(form, chunks[2]);
         frame.render_widget(preview, chunks[3]);
-        frame.render_widget(help, chunks[5]);
+        frame.render_widget(help, help_chunk);
     }
 }
 
@@ -470,4 +588,5 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 pub enum ConfigAction {
     Save,
     Cancel,
+    TestWebhook,
 }
