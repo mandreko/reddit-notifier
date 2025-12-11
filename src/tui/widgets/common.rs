@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
 
@@ -106,83 +106,6 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         Constraint::Percentage((100 - percent_x) / 2),
     ])
     .split(popup_layout[1])[1]
-}
-
-/// Render a message popup (error or success)
-///
-/// Displays a centered popup with a message and a prompt to dismiss.
-///
-/// # Arguments
-/// * `frame` - The frame to render to
-/// * `area` - The full screen area (popup will be centered)
-/// * `message` - The message to display
-/// * `color` - Color for the popup border (e.g., Red for errors, Green for success)
-/// * `title` - Title for the popup (e.g., "Error" or "Success")
-#[deprecated(note = "Use ModalDialog::error(), ModalDialog::success(), or other ModalDialog constructors instead")]
-pub fn render_message_popup(
-    frame: &mut Frame,
-    area: Rect,
-    message: &str,
-    color: Color,
-    title: &str,
-) {
-    let popup_area = centered_rect(60, 20, area);
-    let widget = Paragraph::new(vec![
-        Line::from(""),
-        Line::from(message).alignment(Alignment::Center),
-        Line::from(""),
-        Line::from("[Press any key]").alignment(Alignment::Center),
-    ])
-    .block(
-        Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .style(Style::default().fg(color)),
-    );
-
-    frame.render_widget(Clear, popup_area);
-    frame.render_widget(widget, popup_area);
-}
-
-/// Render a confirmation dialog
-///
-/// Displays a centered yes/no confirmation dialog.
-///
-/// # Arguments
-/// * `frame` - The frame to render to
-/// * `area` - The full screen area (dialog will be centered)
-/// * `prompt` - The question to ask the user
-/// * `title` - Title for the dialog
-#[deprecated(note = "Use ModalDialog::confirm() instead")]
-pub fn render_confirm_dialog(
-    frame: &mut Frame,
-    area: Rect,
-    prompt: &str,
-    title: &str,
-) {
-    let popup_area = centered_rect(50, 30, area);
-    let widget = Paragraph::new(vec![
-        Line::from(""),
-        Line::from(prompt).alignment(Alignment::Center),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("["),
-            Span::styled("y", Style::default().fg(Color::Yellow)),
-            Span::raw("] Yes    ["),
-            Span::styled("n", Style::default().fg(Color::Yellow)),
-            Span::raw("] No"),
-        ])
-        .alignment(Alignment::Center),
-    ])
-    .block(
-        Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .style(Style::default().fg(Color::Red)),
-    );
-
-    frame.render_widget(Clear, popup_area);
-    frame.render_widget(widget, popup_area);
 }
 
 /// Get selection marker and style for list items
