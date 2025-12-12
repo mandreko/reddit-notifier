@@ -1,6 +1,6 @@
 [package]
 name = "reddit-notifier"
-version = "1.5.0"
+version = "1.6.0"
 edition = "2021"
 description = "Poll Reddit subreddits and send notifications via Discord webhooks or Pushover."
 license = "MIT"
