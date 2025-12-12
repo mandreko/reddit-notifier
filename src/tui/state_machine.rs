@@ -6,7 +6,7 @@ use crate::tui::screen_trait::ScreenId;
 /// - The current active screen
 /// - Navigation history for back button support
 ///
-/// Unlike storing Box<dyn Screen>, this approach keeps screens
+/// Unlike storing `Box<dyn Screen>`, this approach keeps screens
 /// owned by the App struct and only tracks navigation state here.
 pub struct ScreenStateMachine {
     /// Currently active screen
