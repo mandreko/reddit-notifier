@@ -30,23 +30,25 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Release ${{ steps.version.outputs.tag }}
-          body: |
-            ## Docker Images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release create "$TAG" \
+            --title "Release $TAG" \
+            --notes "## Docker Images
 
-            ```bash
-            docker pull ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
-            docker pull ghcr.io/${{ github.repository }}:latest
-            ```
+          \`\`\`bash
+          docker pull ghcr.io/${REPO}:${VERSION}
+          docker pull ghcr.io/${REPO}:latest
+          \`\`\`
 
-            ## What's Changed
+          ## What's Changed
 
-            See the [commit history](https://github.com/${{ github.repository }}/commits/${{ steps.version.outputs.tag }}) for details.
-          draft: false
-          prerelease: false
+          See the [commit history](https://github.com/${REPO}/commits/${TAG}) for details." \
+            --latest
 
   build-and-push-docker:
     needs: create-release
