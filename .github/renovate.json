@@ -1,7 +1,14 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "enabledManagers": ["cargo", "github-actions", "dockerfile", "docker-compose"],
+  "enabledManagers": ["cargo", "github-actions", "dockerfile"],
   "dependencyDashboard": true,
+  "pinDigests": true,
+  "minimumReleaseAge": "7 days",
+  "prConcurrentLimit": 5,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 9am on the first day of the month"]
+  },
   "packageRules": [
     {
       "groupName": "cargo minor",
@@ -15,7 +22,7 @@
     },
     {
       "groupName": "docker minor",
-      "matchManagers": ["dockerfile", "docker-compose"],
+      "matchManagers": ["dockerfile"],
       "matchUpdateTypes": ["minor", "patch"]
     }
   ]
