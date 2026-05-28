@@ -37,7 +37,12 @@ impl AppConfig {
         };
 
         let reddit_user_agent = std::env::var("REDDIT_USER_AGENT")
-            .unwrap_or_else(|_| "reddit_notifier (https://github.com/example)".to_string());
+            .unwrap_or_else(|_| {
+                format!(
+                    "reddit_notifier/{} (https://github.com/mandreko/reddit-notifier)",
+                    env!("CARGO_PKG_VERSION")
+                )
+            });
 
         Ok(Self {
             database_url,
