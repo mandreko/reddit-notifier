@@ -372,11 +372,9 @@ async fn handle_list_mode<D: DatabaseService>(
             state.selected_post = 0;
             load_logs(state, context).await?;
         }
-        KeyCode::Char('d') => {
-            if !state.posts.is_empty() {
-                let post_id = state.posts[state.selected_post].id;
-                state.confirm_delete = Some(post_id);
-            }
+        KeyCode::Char('d') if !state.posts.is_empty() => {
+            let post_id = state.posts[state.selected_post].id;
+            state.confirm_delete = Some(post_id);
         }
         KeyCode::Char('f') => {
             state.filter_mode = true;
@@ -408,11 +406,9 @@ async fn handle_truncate_mode<D: DatabaseService>(
     }
 
     match key.code {
-        KeyCode::Char(c) if c.is_ascii_digit() => {
+        KeyCode::Char(c) if c.is_ascii_digit() && state.truncate_days_input.len() < 3 => {
             // Allow max 3 digits (up to 999 days)
-            if state.truncate_days_input.len() < 3 {
-                state.truncate_days_input.push(c);
-            }
+            state.truncate_days_input.push(c);
         }
         KeyCode::Backspace => {
             state.truncate_days_input.pop();

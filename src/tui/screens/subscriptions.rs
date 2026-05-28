@@ -271,37 +271,33 @@ async fn handle_list_mode<D: DatabaseService>(
             input.set_focused(true);
             state.mode = SubscriptionsMode::Creating(input);
         }
-        KeyCode::Char('d') => {
-            if !state.subscriptions.is_empty() {
-                let sub = &state.subscriptions[state.selected];
-                state.mode = SubscriptionsMode::ConfirmDelete {
-                    subscription_id: sub.id,
-                    subreddit_name: sub.subreddit.clone(),
-                };
-            }
+        KeyCode::Char('d') if !state.subscriptions.is_empty() => {
+            let sub = &state.subscriptions[state.selected];
+            state.mode = SubscriptionsMode::ConfirmDelete {
+                subscription_id: sub.id,
+                subreddit_name: sub.subreddit.clone(),
+            };
         }
-        KeyCode::Enter => {
-            if !state.subscriptions.is_empty() {
-                let sub = &state.subscriptions[state.selected];
-                let all_endpoints = context.db.list_endpoints().await?;
-                let linked = context.db.get_subscription_endpoints(sub.id).await?;
-                let linked_ids: Vec<i64> = linked.iter().map(|e| e.id).collect();
+        KeyCode::Enter if !state.subscriptions.is_empty() => {
+            let sub = &state.subscriptions[state.selected];
+            let all_endpoints = context.db.list_endpoints().await?;
+            let linked = context.db.get_subscription_endpoints(sub.id).await?;
+            let linked_ids: Vec<i64> = linked.iter().map(|e| e.id).collect();
 
-                // Find indices of linked endpoints
-                let checked_indices: Vec<usize> = all_endpoints
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, endpoint)| linked_ids.contains(&endpoint.id))
-                    .map(|(i, _)| i)
-                    .collect();
+            // Find indices of linked endpoints
+            let checked_indices: Vec<usize> = all_endpoints
+                .iter()
+                .enumerate()
+                .filter(|(_, endpoint)| linked_ids.contains(&endpoint.id))
+                .map(|(i, _)| i)
+                .collect();
 
-                let checkbox_list = CheckboxList::with_checked(all_endpoints, checked_indices);
+            let checkbox_list = CheckboxList::with_checked(all_endpoints, checked_indices);
 
-                state.mode = SubscriptionsMode::ManagingEndpoints {
-                    subscription_id: sub.id,
-                    checkbox_list,
-                };
-            }
+            state.mode = SubscriptionsMode::ManagingEndpoints {
+                subscription_id: sub.id,
+                checkbox_list,
+            };
         }
         KeyCode::Esc => {
             context.current_screen = Screen::MainMenu;
