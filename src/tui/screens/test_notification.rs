@@ -253,10 +253,8 @@ impl<D: DatabaseService> ScreenTrait<D> for TestNotificationState {
         match key.code {
             KeyCode::Up => self.previous(),
             KeyCode::Down => self.next(),
-            KeyCode::Enter => {
-                if !self.endpoints.is_empty() {
-                    send_test_notification(self, context).await?;
-                }
+            KeyCode::Enter if !self.endpoints.is_empty() => {
+                send_test_notification(self, context).await?;
             }
             KeyCode::Esc => {
                 return Ok(ScreenTransition::GoTo(ScreenId::MainMenu));

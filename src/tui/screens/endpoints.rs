@@ -232,51 +232,43 @@ async fn handle_list_mode<D: DatabaseService>(
         KeyCode::Char('n') => {
             state.mode = EndpointsMode::Creating(ConfigBuilder::new());
         }
-        KeyCode::Char('e') => {
-            if !state.endpoints.is_empty() {
-                let endpoint = state.endpoints[state.selected].clone();
-                match ConfigBuilder::from_existing(endpoint.kind.clone(), &endpoint.config_json, endpoint.note.clone()) {
-                    Ok(builder) => {
-                        state.mode = EndpointsMode::Editing {
-                            endpoint_id: endpoint.id,
-                            builder,
-                        };
-                    }
-                    Err(e) => {
-                        context.messages.set_error(format!("Failed to load config: {}", e));
-                    }
+        KeyCode::Char('e') if !state.endpoints.is_empty() => {
+            let endpoint = state.endpoints[state.selected].clone();
+            match ConfigBuilder::from_existing(endpoint.kind.clone(), &endpoint.config_json, endpoint.note.clone()) {
+                Ok(builder) => {
+                    state.mode = EndpointsMode::Editing {
+                        endpoint_id: endpoint.id,
+                        builder,
+                    };
+                }
+                Err(e) => {
+                    context.messages.set_error(format!("Failed to load config: {}", e));
                 }
             }
         }
-        KeyCode::Char('d') => {
-            if !state.endpoints.is_empty() {
-                let endpoint = state.endpoints[state.selected].clone();
-                let kind_str = endpoint.kind.as_str();
-                state.mode = EndpointsMode::ConfirmDelete {
-                    endpoint_id: endpoint.id,
-                    endpoint_desc: format!("{} (ID: {})", kind_str, endpoint.id),
-                };
-            }
+        KeyCode::Char('d') if !state.endpoints.is_empty() => {
+            let endpoint = state.endpoints[state.selected].clone();
+            let kind_str = endpoint.kind.as_str();
+            state.mode = EndpointsMode::ConfirmDelete {
+                endpoint_id: endpoint.id,
+                endpoint_desc: format!("{} (ID: {})", kind_str, endpoint.id),
+            };
         }
-        KeyCode::Char(' ') => {
-            if !state.endpoints.is_empty() {
-                let endpoint_id = state.endpoints[state.selected].id;
-                match context.db.toggle_endpoint_active(endpoint_id).await {
-                    Ok(_new_status) => {
-                        load_endpoints(state, context).await?;
-                        // Silently update the list - no success message needed
-                    }
-                    Err(e) => {
-                        context.messages.set_error(format!("Failed to toggle: {}", e));
-                    }
+        KeyCode::Char(' ') if !state.endpoints.is_empty() => {
+            let endpoint_id = state.endpoints[state.selected].id;
+            match context.db.toggle_endpoint_active(endpoint_id).await {
+                Ok(_new_status) => {
+                    load_endpoints(state, context).await?;
+                    // Silently update the list - no success message needed
+                }
+                Err(e) => {
+                    context.messages.set_error(format!("Failed to toggle: {}", e));
                 }
             }
         }
-        KeyCode::Enter => {
-            if !state.endpoints.is_empty() {
-                let endpoint = state.endpoints[state.selected].clone();
-                state.mode = EndpointsMode::Viewing { endpoint };
-            }
+        KeyCode::Enter if !state.endpoints.is_empty() => {
+            let endpoint = state.endpoints[state.selected].clone();
+            state.mode = EndpointsMode::Viewing { endpoint };
         }
         KeyCode::Esc => {
             context.current_screen = Screen::MainMenu;
