@@ -41,6 +41,10 @@ DATABASE_URL=sqlite://data.db
 REDDIT_RATE_LIMIT_PER_MINUTE=4
 REDDIT_USER_AGENT=reddit_notifier/1.0 (by u/yourusername)
 
+# Optional: Reddit Authentication (for higher rate limits and access to private subreddits)
+# REDDIT_USERNAME=your_reddit_username
+# REDDIT_PASSWORD=your_reddit_password
+
 # Optional: Database connection retry configuration
 # DB_MAX_RETRIES=5              # Max connection attempts (default: 5)
 # DB_INITIAL_DELAY_MS=500       # Initial retry delay in ms (default: 500)
@@ -53,9 +57,21 @@ REDDIT_USER_AGENT=reddit_notifier/1.0 (by u/yourusername)
 
 **Optional Variables:**
 - `REDDIT_RATE_LIMIT_PER_MINUTE` - Number of Reddit polls per minute (default: 4)
+- `REDDIT_USERNAME` - Reddit username for authenticated requests (enables higher rate limits)
+- `REDDIT_PASSWORD` - Reddit password for authenticated requests
 - `DB_MAX_RETRIES` - Maximum database connection attempts at startup (default: 5)
 - `DB_INITIAL_DELAY_MS` - Initial delay between retry attempts in milliseconds (default: 500)
 - `DB_MAX_DELAY_MS` - Maximum delay between retry attempts in milliseconds (default: 5000)
+
+**Reddit Authentication:**
+Reddit authentication is optional but recommended for production use. Authenticated requests provide:
+- Higher rate limits (up to 100 requests per minute vs ~60 for unauthenticated)
+- Access to private subreddits you're subscribed to
+- More reliable API access with fewer rate limit errors
+
+To enable authentication, add both `REDDIT_USERNAME` and `REDDIT_PASSWORD` to your `.env` file. If only one is provided, the application will fall back to unauthenticated requests.
+
+⚠️ **Security Note**: Store your Reddit credentials securely and never commit them to version control.
 
 **Connection Retry Behavior:**
 The application uses exponential backoff when connecting to the database. This helps handle transient failures in Docker environments like:

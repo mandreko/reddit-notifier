@@ -1,5 +1,4 @@
 use anyhow::Result;
-use reqwest::Client;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{info, warn, error};
@@ -7,6 +6,7 @@ use chrono::{Utc, TimeDelta};
 
 use crate::models::{database::EndpointRow, reddit_api::RedditListing};
 use crate::rate_limiter::RateLimiter;
+use crate::reddit_client::RedditClient;
 use crate::services::DatabaseService;
 
 /// Combined subreddit poller - polls multiple subreddits in a single API call
@@ -22,7 +22,7 @@ use crate::services::DatabaseService;
 ///
 /// # Arguments
 /// * `db` - Database service
-/// * `client` - HTTP client for making Reddit API calls
+/// * `reddit_client` - Reddit client for making API calls (handles authentication)
 /// * `subreddits` - List of subreddit names to poll (will be automatically batched)
 /// * `rate_limiter` - Rate limiter to respect Reddit's API limits
 ///
@@ -32,7 +32,7 @@ use crate::services::DatabaseService;
 /// Default: 20 requests/minute. Reddit's limit is approximately 60 requests/minute.
 pub async fn poll_combined_subreddits_loop<D: DatabaseService>(
     db: Arc<D>,
-    client: Client,
+    reddit_client: RedditClient,
     subreddits: Vec<String>,
     rate_limiter: RateLimiter,
 ) -> Result<()> {
@@ -57,8 +57,6 @@ pub async fn poll_combined_subreddits_loop<D: DatabaseService>(
         batches.len()
     );
 
-    let reddit_base = "https://www.reddit.com";
-
     loop {
         // Fetch the subreddit-to-endpoints mapping once per poll cycle
         // This is more efficient than querying for each post
@@ -75,14 +73,13 @@ pub async fn poll_combined_subreddits_loop<D: DatabaseService>(
             // Wait for rate limiter before making the API call
             rate_limiter.acquire().await;
 
-            // Build the combined subreddit URL (e.g., /r/sub1+sub2+sub3/new.json)
+            // Build the combined subreddit string (e.g., sub1+sub2+sub3)
             let combined_subreddit = batch.join("+");
-            let json_url = format!("{}/r/{}/new.json?limit=100", reddit_base, combined_subreddit);
 
-            match client.get(&json_url).send().await {
+            match reddit_client.get_subreddit_posts(&combined_subreddit, 100).await {
                 Ok(resp) => {
                     if !resp.status().is_success() {
-                        warn!("Reddit GET {} -> {}", json_url, resp.status());
+                        warn!("Reddit API request failed for subreddits '{}' -> {}", combined_subreddit, resp.status());
                         continue;
                     }
 
@@ -155,6 +152,7 @@ pub async fn poll_combined_subreddits_loop<D: DatabaseService>(
                             .collect();
 
                         // Build the post URL
+                        let reddit_base = "https://www.reddit.com";
                         let url = post
                             .permalink
                             .as_ref()
@@ -173,8 +171,8 @@ pub async fn poll_combined_subreddits_loop<D: DatabaseService>(
 
                         // Send notifications to all endpoints
                         for ep in unique_endpoints {
-                            let client_clone = client.clone();
-                            match crate::notifiers::build_notifier(ep, client_clone) {
+                            let http_client = reddit_client.http_client().clone();
+                            match crate::notifiers::build_notifier(ep, http_client) {
                                 Ok(notifier) => {
                                     if let Err(e) =
                                         notifier.send(subreddit, &post.title, &url).await
@@ -195,7 +193,7 @@ pub async fn poll_combined_subreddits_loop<D: DatabaseService>(
                     }
                 }
                 Err(e) => {
-                    warn!("HTTP error fetching combined URL {}: {}", json_url, e);
+                    warn!("HTTP error fetching subreddits '{}': {}", combined_subreddit, e);
                 }
             }
         }

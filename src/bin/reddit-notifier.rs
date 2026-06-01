@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use dotenvy::dotenv;
-use reqwest::Client;
 use sqlx::{sqlite::SqliteConnectOptions, Sqlite};
 use sqlx::migrate::MigrateDatabase;
 use std::str::FromStr;
@@ -13,6 +12,7 @@ use reddit_notifier::db_connection::{connect_with_retry, ConnectionConfig};
 use reddit_notifier::models::config::AppConfig;
 use reddit_notifier::poller::poll_combined_subreddits_loop;
 use reddit_notifier::rate_limiter::RateLimiter;
+use reddit_notifier::reddit_client::RedditClient;
 use reddit_notifier::services::{DatabaseService, SqliteDatabaseService};
 use reddit_notifier::shutdown::{race_with_shutdown, ShutdownRace};
 
@@ -59,9 +59,12 @@ async fn main() -> Result<()> {
     // Create database service
     let db = Arc::new(SqliteDatabaseService::new(pool));
 
-    let client = Client::builder()
-        .user_agent(cfg.reddit_user_agent.clone())
-        .build()?;
+    // Create Reddit client with optional authentication
+    let reddit_client = RedditClient::new(
+        cfg.reddit_user_agent.clone(),
+        cfg.reddit_username.clone(),
+        cfg.reddit_password.clone(),
+    )?;
 
     // Wait for subreddits to be configured
     // Check every 10 seconds until subscriptions exist in the database
@@ -105,7 +108,7 @@ async fn main() -> Result<()> {
     info!("Reddit notifier is running. Press Ctrl+C to shutdown gracefully.");
 
     // Race the poller against the shutdown signal
-    match race_with_shutdown(poll_combined_subreddits_loop(db, client, subreddits, rate_limiter)).await? {
+    match race_with_shutdown(poll_combined_subreddits_loop(db, reddit_client, subreddits, rate_limiter)).await? {
         ShutdownRace::Shutdown => {
             info!("Received shutdown signal, cleaning up...");
         }

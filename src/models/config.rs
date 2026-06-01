@@ -5,6 +5,8 @@ pub struct AppConfig {
     pub database_url: String,
     pub rate_limit_per_minute: u32,
     pub reddit_user_agent: String,
+    pub reddit_username: Option<String>,
+    pub reddit_password: Option<String>,
 }
 
 impl AppConfig {
@@ -44,10 +46,31 @@ impl AppConfig {
                 )
             });
 
+        let reddit_username = std::env::var("REDDIT_USERNAME").ok();
+        let reddit_password = std::env::var("REDDIT_PASSWORD").ok();
+
+        // Log authentication status (without revealing credentials)
+        match (&reddit_username, &reddit_password) {
+            (Some(_), Some(_)) => {
+                tracing::info!("Reddit authentication configured - will use authenticated requests");
+            },
+            (Some(_), None) => {
+                tracing::warn!("Reddit username provided but no password - using unauthenticated requests");
+            },
+            (None, Some(_)) => {
+                tracing::warn!("Reddit password provided but no username - using unauthenticated requests");
+            },
+            (None, None) => {
+                tracing::info!("No Reddit credentials provided - using unauthenticated requests");
+            }
+        }
+
         Ok(Self {
             database_url,
             rate_limit_per_minute,
             reddit_user_agent,
+            reddit_username,
+            reddit_password,
         })
     }
 }

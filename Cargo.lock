@@ -2171,6 +2171,7 @@ version = "1.6.2"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64",
  "chrono",
  "crossterm",
  "dotenvy",
