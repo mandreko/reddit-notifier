@@ -59,11 +59,10 @@ async fn main() -> Result<()> {
     // Create database service
     let db = Arc::new(SqliteDatabaseService::new(pool));
 
-    // Create Reddit client with optional authentication
+    // Create Reddit client with optional session cookie authentication
     let reddit_client = RedditClient::new(
         cfg.reddit_user_agent.clone(),
-        cfg.reddit_username.clone(),
-        cfg.reddit_password.clone(),
+        cfg.reddit_session_cookie.clone(),
     )?;
 
     // Wait for subreddits to be configured

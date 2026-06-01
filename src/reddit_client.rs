@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use base64::prelude::*;
 use reqwest::{Client, Response};
 use tracing::{info, warn};
 
@@ -8,7 +7,7 @@ use tracing::{info, warn};
 pub struct RedditClient {
     client: Client,
     base_url: String,
-    auth_headers: Option<String>,
+    session_cookie: Option<String>,
 }
 
 impl RedditClient {
@@ -16,29 +15,15 @@ impl RedditClient {
     ///
     /// # Arguments
     /// * `user_agent` - User agent string for Reddit requests
-    /// * `username` - Optional Reddit username for authentication
-    /// * `password` - Optional Reddit password for authentication
-    pub fn new(
-        user_agent: String,
-        username: Option<String>,
-        password: Option<String>,
-    ) -> Result<Self> {
+    /// * `session_cookie` - Optional Reddit session cookie for authentication
+    pub fn new(user_agent: String, session_cookie: Option<String>) -> Result<Self> {
         let client = Client::builder()
             .user_agent(user_agent.clone())
             .build()
             .context("Failed to build HTTP client")?;
 
-        // Create basic auth header if credentials are provided
-        let auth_headers = if let (Some(username), Some(password)) = (username, password) {
-            let credentials = format!("{}:{}", username, password);
-            let encoded = BASE64_STANDARD.encode(credentials);
-            Some(format!("Basic {}", encoded))
-        } else {
-            None
-        };
-
-        if auth_headers.is_some() {
-            info!("Reddit client created with authentication");
+        if session_cookie.is_some() {
+            info!("Reddit client created with session cookie authentication");
         } else {
             info!("Reddit client created without authentication");
         }
@@ -46,7 +31,7 @@ impl RedditClient {
         Ok(Self {
             client,
             base_url: "https://www.reddit.com".to_string(),
-            auth_headers,
+            session_cookie,
         })
     }
 
@@ -60,19 +45,15 @@ impl RedditClient {
         subreddit: &str,
         limit: u32,
     ) -> Result<Response> {
-        let url = if self.auth_headers.is_some() {
-            // Use OAuth API endpoint for authenticated requests
-            format!("{}/r/{}/new/.json?limit={}", self.base_url, subreddit, limit)
-        } else {
-            // Use public JSON API for unauthenticated requests
-            format!("{}/r/{}/new.json?limit={}", self.base_url, subreddit, limit)
-        };
+        // Use .json endpoint for both authenticated and unauthenticated requests
+        // Reddit accepts cookies on the public JSON endpoints
+        let url = format!("{}/r/{}/new.json?limit={}", self.base_url, subreddit, limit);
 
         let mut request_builder = self.client.get(&url);
 
-        // Add authentication header if available
-        if let Some(ref auth_header) = self.auth_headers {
-            request_builder = request_builder.header("Authorization", auth_header);
+        // Add session cookie if available
+        if let Some(ref cookie_value) = self.session_cookie {
+            request_builder = request_builder.header("Cookie", format!("reddit_session={}", cookie_value));
         }
 
         let response = request_builder
@@ -85,9 +66,9 @@ impl RedditClient {
 
             // Check for authentication-related errors
             if status == 401 {
-                warn!("Reddit API returned 401 Unauthorized - check your Reddit credentials");
+                warn!("Reddit API returned 401 Unauthorized - check your Reddit session cookie");
             } else if status == 403 {
-                warn!("Reddit API returned 403 Forbidden - you may be rate limited or banned");
+                warn!("Reddit API returned 403 Forbidden - you may be rate limited, banned, or have an invalid session cookie");
             } else if status == 429 {
                 warn!("Reddit API returned 429 Too Many Requests - rate limit exceeded");
             }
@@ -100,7 +81,7 @@ impl RedditClient {
 
     /// Check if the client is configured for authenticated requests
     pub fn is_authenticated(&self) -> bool {
-        self.auth_headers.is_some()
+        self.session_cookie.is_some()
     }
 
     /// Get the underlying HTTP client for other operations
@@ -115,12 +96,7 @@ mod tests {
 
     #[test]
     fn test_reddit_client_creation_without_auth() {
-        let client = RedditClient::new(
-            "test_agent".to_string(),
-            None,
-            None,
-        ).unwrap();
-
+        let client = RedditClient::new("test_agent".to_string(), None).unwrap();
         assert!(!client.is_authenticated());
     }
 
@@ -128,21 +104,8 @@ mod tests {
     fn test_reddit_client_creation_with_auth() {
         let client = RedditClient::new(
             "test_agent".to_string(),
-            Some("testuser".to_string()),
-            Some("testpass".to_string()),
+            Some("test_session_cookie".to_string()),
         ).unwrap();
-
         assert!(client.is_authenticated());
-    }
-
-    #[test]
-    fn test_reddit_client_partial_auth() {
-        let client = RedditClient::new(
-            "test_agent".to_string(),
-            Some("testuser".to_string()),
-            None,
-        ).unwrap();
-
-        assert!(!client.is_authenticated());
     }
 }

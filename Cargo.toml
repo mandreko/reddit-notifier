@@ -23,7 +23,6 @@ async-trait = "0.1"
 html-escape = "0.2.13"
 chrono = { version = "0.4.42", features = ["serde"] }
 serde_with = { version = "3.15.0", features = ["chrono_0_4"] }
-base64 = "0.22"
 ratatui = "0.30"
 crossterm = "0.29"
 
