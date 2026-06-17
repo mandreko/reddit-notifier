@@ -1,4 +1,4 @@
-FROM alpine:3.23.4@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11 AS certs
+FROM alpine:3.24.0@sha256:a2d49ea686c2adfe3c992e47dc3b5e7fa6e6b5055609400dc2acaeb241c829f4 AS certs
 RUN apk --no-cache add ca-certificates
 
 FROM lukemathwalker/cargo-chef:latest-rust-alpine@sha256:c7496a349c0e8d4125935d88aa291504439c170778aa3480181fa509d7b89075 AS chef
