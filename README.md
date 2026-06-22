@@ -41,6 +41,9 @@ DATABASE_URL=sqlite://data.db
 REDDIT_RATE_LIMIT_PER_MINUTE=4
 REDDIT_USER_AGENT=reddit_notifier/1.0 (by u/yourusername)
 
+# Optional: Reddit Authentication (for higher rate limits and access to private subreddits)
+# REDDIT_SESSION_COOKIE=your_reddit_session_cookie_value
+
 # Optional: Database connection retry configuration
 # DB_MAX_RETRIES=5              # Max connection attempts (default: 5)
 # DB_INITIAL_DELAY_MS=500       # Initial retry delay in ms (default: 500)
@@ -53,9 +56,40 @@ REDDIT_USER_AGENT=reddit_notifier/1.0 (by u/yourusername)
 
 **Optional Variables:**
 - `REDDIT_RATE_LIMIT_PER_MINUTE` - Number of Reddit polls per minute (default: 4)
+- `REDDIT_SESSION_COOKIE` - Reddit session cookie for authenticated requests (enables higher rate limits)
 - `DB_MAX_RETRIES` - Maximum database connection attempts at startup (default: 5)
 - `DB_INITIAL_DELAY_MS` - Initial delay between retry attempts in milliseconds (default: 500)
 - `DB_MAX_DELAY_MS` - Maximum delay between retry attempts in milliseconds (default: 5000)
+
+**Reddit Authentication:**
+Reddit authentication is optional but recommended for production use. Authenticated requests provide:
+- Higher rate limits (up to 100 requests per minute vs ~60 for unauthenticated)
+- Access to private subreddits you're subscribed to
+- More reliable API access with fewer rate limit errors
+
+**How to get your Reddit session cookie:**
+
+1. **Log into Reddit** in your web browser
+2. **Open browser developer tools** (F12 or right-click → Inspect)
+3. **Go to the Network tab**
+4. **Visit any Reddit page** (e.g., https://reddit.com/r/all)
+5. **Find a request to reddit.com** in the Network tab
+6. **Look for the Cookie header** in the request headers
+7. **Copy the value after `reddit_session=`** (it will be a long string of letters and numbers)
+8. **Add it to your .env file**: `REDDIT_SESSION_COOKIE=your_session_cookie_value`
+
+**Alternative method using browser storage:**
+1. **Log into Reddit** in your web browser
+2. **Open browser developer tools** (F12)
+3. **Go to Application/Storage tab**
+4. **Navigate to Cookies → reddit.com**
+5. **Find the `reddit_session` cookie**
+6. **Copy its value**
+
+⚠️ **Security Notes**: 
+- Store your session cookie securely and never commit it to version control
+- Session cookies expire - you'll need to refresh them periodically (typically every few months)
+- Don't share your session cookie as it provides access to your Reddit account
 
 **Connection Retry Behavior:**
 The application uses exponential backoff when connecting to the database. This helps handle transient failures in Docker environments like:

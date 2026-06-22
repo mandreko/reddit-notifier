@@ -4,6 +4,7 @@ pub mod models;
 pub mod notifiers;
 pub mod poller;
 pub mod rate_limiter;
+pub mod reddit_client;
 pub mod services;
 pub mod shutdown;
 pub mod tui;

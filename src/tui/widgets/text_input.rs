@@ -113,14 +113,10 @@ impl TextInput {
     /// Returns true if the input was modified
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char(c) if self.is_valid_char(c) => {
-                if self.max_length.is_none_or(|max| self.value.len() < max) {
-                    self.value.insert(self.cursor_pos, c);
-                    self.cursor_pos += 1;
-                    true
-                } else {
-                    false
-                }
+            KeyCode::Char(c) if self.is_valid_char(c) && self.max_length.is_none_or(|max| self.value.len() < max) => {
+                self.value.insert(self.cursor_pos, c);
+                self.cursor_pos += 1;
+                true
             }
             KeyCode::Backspace if self.cursor_pos > 0 => {
                 self.value.remove(self.cursor_pos - 1);
@@ -139,21 +135,13 @@ impl TextInput {
                 self.cursor_pos += 1;
                 true
             }
-            KeyCode::Home => {
-                if self.cursor_pos > 0 {
-                    self.cursor_pos = 0;
-                    true
-                } else {
-                    false
-                }
+            KeyCode::Home if self.cursor_pos > 0 => {
+                self.cursor_pos = 0;
+                true
             }
-            KeyCode::End => {
-                if self.cursor_pos < self.value.len() {
-                    self.cursor_pos = self.value.len();
-                    true
-                } else {
-                    false
-                }
+            KeyCode::End if self.cursor_pos < self.value.len() => {
+                self.cursor_pos = self.value.len();
+                true
             }
             _ => false,
         }

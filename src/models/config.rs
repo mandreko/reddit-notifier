@@ -5,6 +5,7 @@ pub struct AppConfig {
     pub database_url: String,
     pub rate_limit_per_minute: u32,
     pub reddit_user_agent: String,
+    pub reddit_session_cookie: Option<String>,
 }
 
 impl AppConfig {
@@ -37,12 +38,27 @@ impl AppConfig {
         };
 
         let reddit_user_agent = std::env::var("REDDIT_USER_AGENT")
-            .unwrap_or_else(|_| "reddit_notifier (https://github.com/example)".to_string());
+            .unwrap_or_else(|_| {
+                format!(
+                    "reddit_notifier/{} (https://github.com/mandreko/reddit-notifier)",
+                    env!("CARGO_PKG_VERSION")
+                )
+            });
+
+        let reddit_session_cookie = std::env::var("REDDIT_SESSION_COOKIE").ok();
+
+        // Log authentication status (without revealing session cookie)
+        if reddit_session_cookie.is_some() {
+            tracing::info!("Reddit session cookie configured - will use authenticated requests");
+        } else {
+            tracing::info!("No Reddit session cookie provided - using unauthenticated requests");
+        }
 
         Ok(Self {
             database_url,
             rate_limit_per_minute,
             reddit_user_agent,
+            reddit_session_cookie,
         })
     }
 }
