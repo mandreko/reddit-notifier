@@ -1,7 +1,7 @@
 FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS certs
 RUN apk --no-cache add ca-certificates
 
-FROM lukemathwalker/cargo-chef:latest-rust-alpine@sha256:c7496a349c0e8d4125935d88aa291504439c170778aa3480181fa509d7b89075 AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-alpine@sha256:249e8136142523a78564e0c01437fbe188c8226a8776bcb19dc4cc4c1723746e AS chef
 WORKDIR /app
 RUN apk --no-cache add musl-dev openssl-dev openssl-libs-static
 
