@@ -32,7 +32,8 @@ impl Notifier for PushoverNotifier {
             .post("https://api.pushover.net/1/messages.json")
             .form(&form)
             .send()
-            .await?;
+            .await
+            .map_err(super::redact_request_error)?;
         let status = res.status();
         if !status.is_success() {
             let body = res.text().await.unwrap_or_default();

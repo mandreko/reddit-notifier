@@ -27,7 +27,13 @@ impl Notifier for DiscordNotifier {
                 "type": "rich"
             }]
         });
-        let res = self.client.post(&self.cfg.webhook_url).json(&payload).send().await?;
+        let res = self
+            .client
+            .post(&self.cfg.webhook_url)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(super::redact_request_error)?;
         let status = res.status();
         if !status.is_success() {
             let body = res.text().await.unwrap_or_default();
