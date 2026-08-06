@@ -108,6 +108,45 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     .split(popup_layout[1])[1]
 }
 
+/// Config JSON keys whose values are credentials and must not be shown
+/// unmasked: a Discord webhook URL is a bearer credential, and the Pushover
+/// token/user pair likewise grants send access.
+const SECRET_CONFIG_KEYS: [&str; 3] = ["webhook_url", "token", "user"];
+
+/// Mask credential values in an endpoint config JSON for on-screen display.
+///
+/// URLs keep everything up to the final path segment (so the endpoint stays
+/// recognizable) with the trailing secret replaced; other secrets are fully
+/// masked. Unparseable input is masked entirely since it could be anything.
+pub fn mask_config_json(config_json: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(config_json) {
+        Ok(mut value) => {
+            if let Some(obj) = value.as_object_mut() {
+                for key in SECRET_CONFIG_KEYS {
+                    if let Some(v) = obj.get_mut(key) {
+                        if let Some(s) = v.as_str() {
+                            *v = serde_json::Value::String(mask_secret(s));
+                        }
+                    }
+                }
+            }
+            serde_json::to_string(&value).unwrap_or_else(|_| "••••••".to_string())
+        }
+        Err(_) => "••••••".to_string(),
+    }
+}
+
+/// Mask a single secret value, keeping the leading path of an HTTP(S) URL
+/// visible so the user can still tell endpoints apart.
+fn mask_secret(secret: &str) -> String {
+    if secret.starts_with("http://") || secret.starts_with("https://") {
+        if let Some((prefix, _token)) = secret.rsplit_once('/') {
+            return format!("{}/••••••", prefix);
+        }
+    }
+    "••••••".to_string()
+}
+
 /// Get selection marker and style for list items
 ///
 /// Returns a tuple of (prefix, style) to be applied to list items.
@@ -156,6 +195,34 @@ mod tests {
         let (prefix, style) = selection_style(false);
         assert_eq!(prefix, "  ");
         assert_eq!(style.fg, None);
+    }
+
+    #[test]
+    fn test_mask_config_json_discord() {
+        let masked = mask_config_json(
+            r#"{"webhook_url":"https://discord.com/api/webhooks/1234/secret-token","username":"Bot"}"#,
+        );
+        assert!(!masked.contains("secret-token"));
+        // Prefix stays visible so endpoints remain distinguishable
+        assert!(masked.contains("https://discord.com/api/webhooks/1234/••••••"));
+        // Discord username is display-only, not a secret
+        assert!(masked.contains("Bot"));
+    }
+
+    #[test]
+    fn test_mask_config_json_pushover() {
+        let masked =
+            mask_config_json(r#"{"token":"app-token-abc","user":"user-key-xyz","device":"phone"}"#);
+        assert!(!masked.contains("app-token-abc"));
+        assert!(!masked.contains("user-key-xyz"));
+        assert!(masked.contains("phone"));
+    }
+
+    #[test]
+    fn test_mask_config_json_unparseable_is_fully_masked() {
+        let masked = mask_config_json("not json with a secret");
+        assert!(!masked.contains("secret"));
+        assert_eq!(masked, "••••••");
     }
 
     #[test]

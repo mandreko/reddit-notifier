@@ -202,9 +202,10 @@ async fn send_test_notification<D: DatabaseService>(
     state: &mut TestNotificationState,
     _context: &mut crate::tui::app::AppContext<D>,
 ) -> Result<()> {
-    state.status = TestStatus::Sending;
-
-    let endpoint = state.endpoints[state.selected].clone();
+    let Some(endpoint) = state.endpoints.get(state.selected).cloned() else {
+        state.status = TestStatus::Error("No endpoint selected".to_string());
+        return Ok(());
+    };
 
     // Create HTTP client
     let client = reqwest::Client::builder()
@@ -249,12 +250,15 @@ impl<D: DatabaseService> ScreenTrait<D> for TestNotificationState {
         super::test_notification::render(frame, app)
     }
 
-    async fn handle_key(&mut self, context: &mut crate::tui::app::AppContext<D>, key: KeyEvent) -> Result<ScreenTransition> {
+    async fn handle_key(&mut self, _context: &mut crate::tui::app::AppContext<D>, key: KeyEvent) -> Result<ScreenTransition> {
         match key.code {
             KeyCode::Up => self.previous(),
             KeyCode::Down => self.next(),
-            KeyCode::Enter if !self.endpoints.is_empty() => {
-                send_test_notification(self, context).await?;
+            // Only mark as sending here; the request itself runs in tick()
+            // after the "Sending..." frame has been drawn, so the UI shows
+            // progress instead of freezing on the old status
+            KeyCode::Enter if !self.endpoints.is_empty() && self.status != TestStatus::Sending => {
+                self.status = TestStatus::Sending;
             }
             KeyCode::Esc => {
                 return Ok(ScreenTransition::GoTo(ScreenId::MainMenu));
@@ -267,6 +271,16 @@ impl<D: DatabaseService> ScreenTrait<D> for TestNotificationState {
 
     async fn on_enter(&mut self, context: &mut crate::tui::app::AppContext<D>) -> Result<()> {
         super::test_notification::load_endpoints(self, context).await
+    }
+
+    async fn tick(&mut self, context: &mut crate::tui::app::AppContext<D>) -> Result<()> {
+        if self.status == TestStatus::Sending {
+            send_test_notification(self, context).await?;
+            // Drop keystrokes buffered during the request so a held Enter
+            // can't fire duplicate notifications
+            crate::tui::app::drain_pending_input();
+        }
+        Ok(())
     }
 
     fn id(&self) -> ScreenId {

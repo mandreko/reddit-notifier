@@ -63,9 +63,10 @@ impl WebhookValidationState {
 
     pub fn message(&self) -> Option<&str> {
         match self {
+            Self::Validating => Some("Testing webhook..."),
             Self::Valid(msg) => Some(msg),
             Self::Invalid(msg) => Some(msg),
-            _ => None,
+            Self::Idle => None,
         }
     }
 }
@@ -359,11 +360,15 @@ impl ConfigBuilder {
     pub fn preview_json(&self) -> String {
         match self.build_json() {
             Ok(json) => {
+                // Mask credentials in the preview - the form fields themselves
+                // stay visible while typing, but the preview duplicates them
+                // and lingers on screen
+                let masked = super::common::mask_config_json(&json);
                 // Pretty print
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
-                    serde_json::to_string_pretty(&value).unwrap_or(json)
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&masked) {
+                    serde_json::to_string_pretty(&value).unwrap_or(masked)
                 } else {
-                    json
+                    masked
                 }
             }
             Err(e) => format!("Validation error: {}", e),

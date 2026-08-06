@@ -15,7 +15,9 @@ use crate::tui::app::{App, Screen};
 use crate::tui::screen_trait::{Screen as ScreenTrait, ScreenId, ScreenTransition};
 use crate::tui::state::Navigable;
 use crate::tui::widgets::common;
-use crate::tui::widgets::{ColumnDef, ConfigAction, ConfigBuilder, ModalDialog, SelectableTable};
+use crate::tui::widgets::{
+    ColumnDef, ConfigAction, ConfigBuilder, ModalDialog, SelectableTable, WebhookValidationState,
+};
 
 #[derive(Debug, Clone)]
 pub enum EndpointsMode {
@@ -27,6 +29,8 @@ pub enum EndpointsMode {
     },
     Viewing {
         endpoint: EndpointRow,
+        /// Secrets are masked until the user explicitly reveals them
+        show_secrets: bool,
     },
     ConfirmDelete {
         endpoint_id: i64,
@@ -94,7 +98,9 @@ pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
             render_list(frame, app, area);
             builder.render(frame, area);
         }
-        EndpointsMode::Viewing { endpoint } => render_viewing(frame, app, area, endpoint),
+        EndpointsMode::Viewing { endpoint, show_secrets } => {
+            render_viewing(frame, app, area, endpoint, *show_secrets)
+        }
         EndpointsMode::ConfirmDelete { endpoint_desc, .. } => {
             render_list(frame, app, area);
             let prompt = format!("Delete {}?", endpoint_desc);
@@ -157,7 +163,8 @@ fn render_list<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) 
             kind_str.to_string(),
             active.to_string(),
             note_display.to_string(),
-            endpoint.config_json.clone(),
+            // Never render raw config in the list - it contains credentials
+            common::mask_config_json(&endpoint.config_json),
         ])
         .style(style)
     });
@@ -177,7 +184,13 @@ fn render_list<D: DatabaseService>(frame: &mut Frame, app: &App<D>, area: Rect) 
     frame.render_widget(help, chunks[2]);
 }
 
-fn render_viewing<D: DatabaseService>(frame: &mut Frame, _app: &App<D>, area: Rect, endpoint: &EndpointRow) {
+fn render_viewing<D: DatabaseService>(
+    frame: &mut Frame,
+    _app: &App<D>,
+    area: Rect,
+    endpoint: &EndpointRow,
+    show_secrets: bool,
+) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
@@ -199,11 +212,18 @@ fn render_viewing<D: DatabaseService>(frame: &mut Frame, _app: &App<D>, area: Re
     );
     frame.render_widget(title, chunks[0]);
 
-    // Pretty print JSON
-    let pretty_json = if let Ok(value) = serde_json::from_str::<serde_json::Value>(&endpoint.config_json) {
-        serde_json::to_string_pretty(&value).unwrap_or_else(|_| endpoint.config_json.clone())
-    } else {
+    // Mask credentials unless the user explicitly revealed them
+    let display_json = if show_secrets {
         endpoint.config_json.clone()
+    } else {
+        common::mask_config_json(&endpoint.config_json)
+    };
+
+    // Pretty print JSON
+    let pretty_json = if let Ok(value) = serde_json::from_str::<serde_json::Value>(&display_json) {
+        serde_json::to_string_pretty(&value).unwrap_or_else(|_| display_json.clone())
+    } else {
+        display_json
     };
 
     let config = Paragraph::new(pretty_json)
@@ -215,7 +235,12 @@ fn render_viewing<D: DatabaseService>(frame: &mut Frame, _app: &App<D>, area: Re
         .style(Style::default().fg(Color::Green));
     frame.render_widget(config, chunks[1]);
 
-    let help = Paragraph::new("[Esc] Back")
+    let help_text = if show_secrets {
+        "[s] Hide secrets  [Esc] Back"
+    } else {
+        "[s] Show secrets  [Esc] Back"
+    };
+    let help = Paragraph::new(help_text)
         .alignment(Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
     frame.render_widget(help, chunks[2]);
@@ -268,7 +293,10 @@ async fn handle_list_mode<D: DatabaseService>(
         }
         KeyCode::Enter if !state.endpoints.is_empty() => {
             let endpoint = state.endpoints[state.selected].clone();
-            state.mode = EndpointsMode::Viewing { endpoint };
+            state.mode = EndpointsMode::Viewing {
+                endpoint,
+                show_secrets: false,
+            };
         }
         KeyCode::Esc => {
             context.current_screen = Screen::MainMenu;
@@ -313,8 +341,9 @@ async fn handle_creating_mode<D: DatabaseService>(
             state.mode = EndpointsMode::List;
         }
         Some(ConfigAction::TestWebhook) => {
-            // Trigger webhook validation
-            new_builder.validate_webhook().await.ok();
+            // Mark as validating; the request runs in tick() after the
+            // "Validating" frame has been drawn
+            new_builder.webhook_validation = WebhookValidationState::Validating;
             state.mode = EndpointsMode::Creating(new_builder);
         }
         None => {
@@ -360,8 +389,9 @@ async fn handle_editing_mode<D: DatabaseService>(
             state.mode = EndpointsMode::List;
         }
         Some(ConfigAction::TestWebhook) => {
-            // Trigger webhook validation
-            new_builder.validate_webhook().await.ok();
+            // Mark as validating; the request runs in tick() after the
+            // "Validating" frame has been drawn
+            new_builder.webhook_validation = WebhookValidationState::Validating;
             state.mode = EndpointsMode::Editing {
                 endpoint_id,
                 builder: new_builder,
@@ -381,9 +411,20 @@ async fn handle_editing_mode<D: DatabaseService>(
 async fn handle_viewing_mode<D: DatabaseService>(
     state: &mut EndpointsState,
     _context: &mut crate::tui::app::AppContext<D>,
-    _key: KeyEvent,
+    key: KeyEvent,
 ) -> Result<()> {
-    state.mode = EndpointsMode::List;
+    match (key.code, &state.mode) {
+        // Toggle secret visibility; anything else closes the view
+        (KeyCode::Char('s'), EndpointsMode::Viewing { endpoint, show_secrets }) => {
+            state.mode = EndpointsMode::Viewing {
+                endpoint: endpoint.clone(),
+                show_secrets: !show_secrets,
+            };
+        }
+        _ => {
+            state.mode = EndpointsMode::List;
+        }
+    }
     Ok(())
 }
 
@@ -461,6 +502,35 @@ impl<D: DatabaseService> ScreenTrait<D> for EndpointsState {
 
     async fn on_enter(&mut self, context: &mut crate::tui::app::AppContext<D>) -> Result<()> {
         super::endpoints::load_endpoints(self, context).await
+    }
+
+    async fn tick(&mut self, _context: &mut crate::tui::app::AppContext<D>) -> Result<()> {
+        // Run a pending webhook test now that the "Validating" frame is drawn
+        let pending = matches!(
+            &self.mode,
+            EndpointsMode::Creating(builder)
+                if builder.webhook_validation == WebhookValidationState::Validating
+        ) || matches!(
+            &self.mode,
+            EndpointsMode::Editing { builder, .. }
+                if builder.webhook_validation == WebhookValidationState::Validating
+        );
+
+        if pending {
+            match &mut self.mode {
+                EndpointsMode::Creating(builder) => {
+                    builder.validate_webhook().await.ok();
+                }
+                EndpointsMode::Editing { builder, .. } => {
+                    builder.validate_webhook().await.ok();
+                }
+                _ => {}
+            }
+            // Drop keystrokes buffered during the request so a held Ctrl+T
+            // can't fire duplicate live test messages
+            crate::tui::app::drain_pending_input();
+        }
+        Ok(())
     }
 
     fn id(&self) -> ScreenId {

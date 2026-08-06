@@ -38,6 +38,18 @@ pub trait Screen<D: DatabaseService>: Send {
         Ok(())
     }
 
+    /// Called once per event-loop iteration, after the screen has rendered
+    /// (optional lifecycle hook)
+    ///
+    /// Use this for deferred work that should run after a progress state has
+    /// been drawn - e.g. a network request the user just triggered. Doing that
+    /// work in `handle_key` freezes the UI before the "in progress" frame is
+    /// ever shown.
+    async fn tick(&mut self, context: &mut AppContext<D>) -> Result<()> {
+        let _ = context;
+        Ok(())
+    }
+
     /// Get the screen identifier
     fn id(&self) -> ScreenId;
 }

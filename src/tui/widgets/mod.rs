@@ -9,7 +9,7 @@ pub mod selectable_table;
 pub mod text_input;
 
 pub use checkbox_list::CheckboxList;
-pub use config_builder::{ConfigAction, ConfigBuilder};
+pub use config_builder::{ConfigAction, ConfigBuilder, WebhookValidationState};
 pub use dropdown::Dropdown;
 pub use form_field::{FormField, ValidationState};
 pub use modal_dialog::{DialogType, ModalDialog};

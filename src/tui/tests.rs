@@ -543,4 +543,72 @@ mod regression_tests {
             .expect("Failed to handle key");
         assert!(app.states.logs_state.confirm_delete.is_none());
     }
+
+    fn test_endpoint() -> crate::models::database::EndpointRow {
+        crate::models::database::EndpointRow {
+            id: 1,
+            kind: crate::models::database::EndpointKind::Discord,
+            config_json: r#"{"webhook_url":"https://discord.com/api/webhooks/1/secret"}"#
+                .to_string(),
+            active: true,
+            note: None,
+        }
+    }
+
+    /// Enter on the test-notification screen must only mark the send as
+    /// pending; the network request runs in tick() after the "Sending..."
+    /// frame has been drawn, so handle_key never blocks the event loop.
+    #[tokio::test]
+    async fn test_send_test_notification_is_deferred_to_tick() {
+        let db = create_test_db();
+        let mut app = App::new(db).expect("Failed to create app");
+        app.goto_screen(Screen::TestNotification);
+        app.states.test_notification_state.endpoints = vec![test_endpoint()];
+
+        app.handle_key(key(KeyCode::Enter))
+            .await
+            .expect("Failed to handle key");
+
+        use crate::tui::screens::test_notification::TestStatus;
+        assert_eq!(app.states.test_notification_state.status, TestStatus::Sending);
+    }
+
+    /// The endpoint detail view starts with secrets masked; 's' toggles the
+    /// reveal and Esc closes the view.
+    #[tokio::test]
+    async fn test_endpoint_viewing_secrets_hidden_until_revealed() {
+        use crate::tui::screens::endpoints::EndpointsMode;
+
+        let db = create_test_db();
+        let mut app = App::new(db).expect("Failed to create app");
+        app.goto_screen(Screen::Endpoints);
+        app.states.endpoints_state.endpoints = vec![test_endpoint()];
+
+        // Enter opens the detail view with secrets masked
+        app.handle_key(key(KeyCode::Enter))
+            .await
+            .expect("Failed to handle key");
+        assert!(matches!(
+            app.states.endpoints_state.mode,
+            EndpointsMode::Viewing { show_secrets: false, .. }
+        ));
+
+        // 's' reveals
+        app.handle_key(key(KeyCode::Char('s')))
+            .await
+            .expect("Failed to handle key");
+        assert!(matches!(
+            app.states.endpoints_state.mode,
+            EndpointsMode::Viewing { show_secrets: true, .. }
+        ));
+
+        // Esc closes the view
+        app.handle_key(key(KeyCode::Esc))
+            .await
+            .expect("Failed to handle key");
+        assert!(matches!(
+            app.states.endpoints_state.mode,
+            EndpointsMode::List
+        ));
+    }
 }

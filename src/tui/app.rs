@@ -19,6 +19,14 @@ pub enum Screen {
     Logs,
 }
 
+/// Discard any keystrokes buffered while a blocking operation ran, so held or
+/// repeated keys can't queue duplicate actions (e.g. extra test notifications).
+pub(crate) fn drain_pending_input() {
+    while let Ok(true) = event::poll(Duration::ZERO) {
+        let _ = event::read();
+    }
+}
+
 /// Context that screens need access to (everything except screen states)
 pub struct AppContext<D: DatabaseService> {
     pub db: Arc<D>,
@@ -130,6 +138,25 @@ impl<D: DatabaseService> App<D> {
                 }
                 self.context.messages.render(frame, frame.area());
             })?;
+
+            // Run deferred screen work (e.g. a network request triggered by the
+            // previous keypress) now that the progress frame has been drawn
+            {
+                let context = &mut self.context;
+                let states = &mut self.states;
+                let ticked = match current_screen_id {
+                    ScreenId::MainMenu => states.main_menu_state.tick(context).await,
+                    ScreenId::Subscriptions => states.subscriptions_state.tick(context).await,
+                    ScreenId::Endpoints => states.endpoints_state.tick(context).await,
+                    ScreenId::TestNotification => {
+                        states.test_notification_state.tick(context).await
+                    }
+                    ScreenId::Logs => states.logs_state.tick(context).await,
+                };
+                if let Err(e) = ticked {
+                    context.messages.set_error(format!("Error: {}", e));
+                }
+            }
 
             // Handle input with timeout
             if event::poll(Duration::from_millis(100))? {
