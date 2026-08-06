@@ -236,7 +236,8 @@ impl ConfigBuilder {
                 }
                 Ok(None)
             }
-            KeyCode::Char(c) => {
+            // Ignore control/alt chords so e.g. Ctrl+C doesn't type a literal 'c'
+            KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
                 if self.editing_note {
                     self.note.push(c);
                 } else {
@@ -253,9 +254,16 @@ impl ConfigBuilder {
                 Ok(None)
             }
             KeyCode::Enter => {
-                // Validate and build JSON
-                self.validate_and_build()?;
-                Ok(Some(ConfigAction::Save))
+                // Validate before saving. A failure must keep the form open
+                // with inline feedback - propagating it with `?` would bubble
+                // all the way to main and exit the whole TUI.
+                match self.validate_and_build() {
+                    Ok(()) => Ok(Some(ConfigAction::Save)),
+                    Err(e) => {
+                        self.webhook_validation = WebhookValidationState::Invalid(e.to_string());
+                        Ok(None)
+                    }
+                }
             }
             KeyCode::Esc => Ok(Some(ConfigAction::Cancel)),
             _ => Ok(None),
@@ -589,4 +597,67 @@ pub enum ConfigAction {
     Save,
     Cancel,
     TestWebhook,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn form_builder() -> ConfigBuilder {
+        let mut builder = ConfigBuilder::new();
+        builder.type_selection_mode = false;
+        builder
+    }
+
+    #[test]
+    fn enter_with_empty_required_field_keeps_form_open() {
+        let mut builder = form_builder();
+
+        // Must return Ok(None) - an Err here used to propagate to main and
+        // exit the entire TUI, losing the user's input
+        let action = builder
+            .handle_input(KeyEvent::from(KeyCode::Enter))
+            .expect("validation failure must not be an error");
+        assert!(action.is_none());
+        assert!(matches!(
+            builder.webhook_validation,
+            WebhookValidationState::Invalid(_)
+        ));
+    }
+
+    #[test]
+    fn enter_with_non_https_webhook_keeps_form_open() {
+        let mut builder = form_builder();
+        builder.fields[0].value = "http://discord.com/api/webhooks/1/x".to_string();
+
+        let action = builder
+            .handle_input(KeyEvent::from(KeyCode::Enter))
+            .expect("validation failure must not be an error");
+        assert!(action.is_none());
+        assert!(matches!(
+            builder.webhook_validation,
+            WebhookValidationState::Invalid(_)
+        ));
+    }
+
+    #[test]
+    fn enter_with_valid_form_returns_save() {
+        let mut builder = form_builder();
+        builder.fields[0].value = "https://discord.com/api/webhooks/1/x".to_string();
+
+        let action = builder
+            .handle_input(KeyEvent::from(KeyCode::Enter))
+            .unwrap();
+        assert!(matches!(action, Some(ConfigAction::Save)));
+    }
+
+    #[test]
+    fn control_chords_do_not_insert_literal_chars() {
+        let mut builder = form_builder();
+
+        builder
+            .handle_input(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
+            .unwrap();
+        assert!(builder.fields[0].value.is_empty());
+    }
 }

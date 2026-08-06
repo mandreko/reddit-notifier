@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
 use std::sync::Arc;
 use std::time::Duration;
@@ -84,22 +84,27 @@ impl<D: DatabaseService> App<D> {
                 let context = &mut self.context;
                 let states = &mut self.states;
 
-                match current_screen_id {
+                // A failed data load (e.g. transient SQLite lock) is shown as
+                // an error message rather than exiting the whole TUI
+                let entered = match current_screen_id {
                     ScreenId::MainMenu => {
-                        states.main_menu_state.on_enter(context).await?;
+                        states.main_menu_state.on_enter(context).await
                     }
                     ScreenId::Subscriptions => {
-                        states.subscriptions_state.on_enter(context).await?;
+                        states.subscriptions_state.on_enter(context).await
                     }
                     ScreenId::Endpoints => {
-                        states.endpoints_state.on_enter(context).await?;
+                        states.endpoints_state.on_enter(context).await
                     }
                     ScreenId::TestNotification => {
-                        states.test_notification_state.on_enter(context).await?;
+                        states.test_notification_state.on_enter(context).await
                     }
                     ScreenId::Logs => {
-                        states.logs_state.on_enter(context).await?;
+                        states.logs_state.on_enter(context).await
                     }
+                };
+                if let Err(e) = entered {
+                    context.messages.set_error(format!("Failed to load screen: {}", e));
                 }
                 last_screen_id = current_screen_id;
             }
@@ -130,7 +135,16 @@ impl<D: DatabaseService> App<D> {
             if event::poll(Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
                     if key.kind == KeyEventKind::Press {
-                        self.handle_key(key).await?;
+                        // Global force-quit: raw mode suppresses SIGINT, so
+                        // without this there is no way to interrupt the TUI
+                        if key.code == KeyCode::Char('c')
+                            && key.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            self.context.should_quit = true;
+                        } else if let Err(e) = self.handle_key(key).await {
+                            // Screen errors are surfaced, not fatal
+                            self.context.messages.set_error(format!("Error: {}", e));
+                        }
                     }
                 }
             }

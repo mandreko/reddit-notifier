@@ -455,3 +455,92 @@ mod navigation_tests {
         assert_eq!(app.states.test_notification_state.selected(), 0);
     }
 }
+
+#[cfg(test)]
+mod regression_tests {
+    use crate::services::mock_database::MockDatabaseService;
+    use crate::services::DatabaseService;
+    use crate::tui::app::{App, Screen};
+    use crate::tui::screens::logs::load_logs;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::sync::Arc;
+
+    fn create_test_db() -> Arc<MockDatabaseService> {
+        Arc::new(MockDatabaseService::new())
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    /// Filtering the logs down to a shorter list used to leave `selected_post`
+    /// pointing past the end, panicking on the next 'd' keypress.
+    #[tokio::test]
+    async fn test_logs_selection_clamped_when_filter_shrinks_list() {
+        let db = create_test_db();
+        db.record_if_new("solo", "p0").await.unwrap();
+        for i in 1..=10 {
+            db.record_if_new("busy", &format!("p{}", i)).await.unwrap();
+        }
+        let mut app = App::new(db).expect("Failed to create app");
+
+        load_logs(&mut app.states.logs_state, &mut app.context)
+            .await
+            .expect("Failed to load logs");
+        assert_eq!(app.states.logs_state.posts.len(), 11);
+
+        // Navigate to the last post, then filter down to a 1-post subreddit
+        app.states.logs_state.selected_post = 10;
+        app.states.logs_state.filter_subreddit = Some("solo".to_string());
+        load_logs(&mut app.states.logs_state, &mut app.context)
+            .await
+            .expect("Failed to reload logs");
+
+        assert_eq!(app.states.logs_state.posts.len(), 1);
+        assert!(
+            app.states.logs_state.selected_post < app.states.logs_state.posts.len(),
+            "selected_post must be clamped when the list shrinks"
+        );
+
+        // 'd' must select the post for deletion instead of panicking
+        app.goto_screen(Screen::Logs);
+        app.handle_key(key(KeyCode::Char('d')))
+            .await
+            .expect("Failed to handle key");
+        assert!(app.states.logs_state.confirm_delete.is_some());
+    }
+
+    /// Applying a filter with a stale selection (subscriptions deleted since
+    /// the list loaded) used to index out of bounds.
+    #[tokio::test]
+    async fn test_logs_filter_enter_with_stale_selection_does_not_panic() {
+        let db = create_test_db();
+        let mut app = App::new(db).expect("Failed to create app");
+        app.goto_screen(Screen::Logs);
+
+        // Simulate the stale state: filter selection points at an entry that
+        // no longer exists (available_subreddits is empty)
+        app.states.logs_state.filter_mode = true;
+        app.states.logs_state.filter_selected = 2;
+
+        app.handle_key(key(KeyCode::Enter))
+            .await
+            .expect("stale filter selection must not panic or error");
+
+        assert!(app.states.logs_state.filter_subreddit.is_none());
+        assert!(!app.states.logs_state.filter_mode);
+    }
+
+    /// 'd' with an empty log list must be a no-op, not a panic.
+    #[tokio::test]
+    async fn test_logs_delete_on_empty_list_is_noop() {
+        let db = create_test_db();
+        let mut app = App::new(db).expect("Failed to create app");
+        app.goto_screen(Screen::Logs);
+
+        app.handle_key(key(KeyCode::Char('d')))
+            .await
+            .expect("Failed to handle key");
+        assert!(app.states.logs_state.confirm_delete.is_none());
+    }
+}

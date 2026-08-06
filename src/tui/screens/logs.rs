@@ -125,7 +125,26 @@ pub async fn load_logs<D: DatabaseService>(
     };
 
     state.posts = posts;
+
+    // Clamp selections: the post list and subreddit list may have shrunk
+    // (filtering, truncating, deletions on other screens) and a stale index
+    // would panic on the next lookup
+    state.selected_post = state.selected_post.min(state.posts.len().saturating_sub(1));
+    state.filter_selected = state.filter_selected.min(state.available_subreddits.len());
     Ok(())
+}
+
+/// Reload logs, reporting failures through the message display.
+///
+/// Transient SQLite errors (e.g. the poller daemon holding the write lock
+/// past the busy timeout) must not exit the TUI.
+async fn reload_logs<D: DatabaseService>(
+    state: &mut LogsState,
+    context: &mut crate::tui::app::AppContext<D>,
+) {
+    if let Err(e) = load_logs(state, context).await {
+        context.messages.set_error(format!("Failed to load logs: {}", e));
+    }
 }
 
 pub fn render<D: DatabaseService>(frame: &mut Frame, app: &App<D>) {
@@ -365,16 +384,17 @@ async fn handle_list_mode<D: DatabaseService>(
         KeyCode::Left => {
             state.prev_page();
             state.selected_post = 0;
-            load_logs(state, context).await?;
+            reload_logs(state, context).await;
         }
         KeyCode::Right => {
             state.next_page();
             state.selected_post = 0;
-            load_logs(state, context).await?;
+            reload_logs(state, context).await;
         }
-        KeyCode::Char('d') if !state.posts.is_empty() => {
-            let post_id = state.posts[state.selected_post].id;
-            state.confirm_delete = Some(post_id);
+        KeyCode::Char('d') => {
+            if let Some(post) = state.posts.get(state.selected_post) {
+                state.confirm_delete = Some(post.id);
+            }
         }
         KeyCode::Char('f') => {
             state.filter_mode = true;
@@ -401,7 +421,7 @@ async fn handle_truncate_mode<D: DatabaseService>(
         state.truncate_mode = false;
         state.truncate_result = None;
         state.current_page = 0;
-        load_logs(state, context).await?;
+        reload_logs(state, context).await;
         return Ok(());
     }
 
@@ -456,18 +476,19 @@ async fn handle_filter_mode<D: DatabaseService>(
             state.next_filter();
         }
         KeyCode::Enter => {
-            // Apply filter
-            if state.filter_selected == 0 {
-                state.filter_subreddit = None;
+            // Apply filter; fall back to "All Subreddits" if the selection is
+            // stale (subscriptions may have been deleted since the list loaded)
+            state.filter_subreddit = if state.filter_selected == 0 {
+                None
             } else {
-                let sub = state.available_subreddits
-                    [state.filter_selected - 1]
-                    .clone();
-                state.filter_subreddit = Some(sub);
-            }
+                state
+                    .available_subreddits
+                    .get(state.filter_selected - 1)
+                    .cloned()
+            };
             state.current_page = 0;
             state.filter_mode = false;
-            load_logs(state, context).await?;
+            reload_logs(state, context).await;
         }
         KeyCode::Esc => {
             state.filter_mode = false;
@@ -485,10 +506,19 @@ async fn handle_confirm_delete_mode<D: DatabaseService>(
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
             if let Some(post_id) = state.confirm_delete {
-                context.db.delete_notified_post(post_id).await?;
+                // Surface DB errors in the UI instead of propagating them up
+                // to main, which would exit the whole TUI (e.g. when the
+                // poller daemon holds the SQLite write lock)
+                match context.db.delete_notified_post(post_id).await {
+                    Ok(()) => {
+                        state.selected_post = 0;
+                        reload_logs(state, context).await;
+                    }
+                    Err(e) => {
+                        context.messages.set_error(format!("Failed to delete log entry: {}", e));
+                    }
+                }
                 state.confirm_delete = None;
-                state.selected_post = 0;
-                load_logs(state, context).await?;
             }
         }
         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {

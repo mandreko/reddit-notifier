@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
@@ -89,7 +89,7 @@ impl TextInput {
     /// Set the initial value
     pub fn with_value(mut self, value: impl Into<String>) -> Self {
         let val = value.into();
-        self.cursor_pos = val.len();
+        self.cursor_pos = val.chars().count();
         self.value = val;
         self
     }
@@ -108,30 +108,54 @@ impl TextInput {
         }
     }
 
+    /// Number of characters (not bytes) in the value
+    fn char_count(&self) -> usize {
+        self.value.chars().count()
+    }
+
+    /// Convert a character position to a byte offset into `value`.
+    ///
+    /// `cursor_pos` counts characters, but String::insert/remove take byte
+    /// offsets and panic on non-boundary indices (e.g. after typing 'é').
+    fn byte_offset(&self, char_pos: usize) -> usize {
+        self.value
+            .char_indices()
+            .nth(char_pos)
+            .map_or(self.value.len(), |(offset, _)| offset)
+    }
+
     /// Handle keyboard input
     ///
     /// Returns true if the input was modified
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Char(c) if self.is_valid_char(c) && self.max_length.is_none_or(|max| self.value.len() < max) => {
-                self.value.insert(self.cursor_pos, c);
+            // Ignore control/alt chords so e.g. Ctrl+C doesn't type a literal 'c'
+            KeyCode::Char(c)
+                if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                    && self.is_valid_char(c)
+                    && self.max_length.is_none_or(|max| self.char_count() < max) =>
+            {
+                let offset = self.byte_offset(self.cursor_pos);
+                self.value.insert(offset, c);
                 self.cursor_pos += 1;
                 true
             }
             KeyCode::Backspace if self.cursor_pos > 0 => {
-                self.value.remove(self.cursor_pos - 1);
+                let offset = self.byte_offset(self.cursor_pos - 1);
+                self.value.remove(offset);
                 self.cursor_pos -= 1;
                 true
             }
-            KeyCode::Delete if self.cursor_pos < self.value.len() => {
-                self.value.remove(self.cursor_pos);
+            KeyCode::Delete if self.cursor_pos < self.char_count() => {
+                let offset = self.byte_offset(self.cursor_pos);
+                self.value.remove(offset);
                 true
             }
             KeyCode::Left if self.cursor_pos > 0 => {
                 self.cursor_pos -= 1;
                 true
             }
-            KeyCode::Right if self.cursor_pos < self.value.len() => {
+            KeyCode::Right if self.cursor_pos < self.char_count() => {
                 self.cursor_pos += 1;
                 true
             }
@@ -139,8 +163,8 @@ impl TextInput {
                 self.cursor_pos = 0;
                 true
             }
-            KeyCode::End if self.cursor_pos < self.value.len() => {
-                self.cursor_pos = self.value.len();
+            KeyCode::End if self.cursor_pos < self.char_count() => {
+                self.cursor_pos = self.char_count();
                 true
             }
             _ => false,
@@ -165,13 +189,9 @@ impl TextInput {
         } else {
             // Show actual value with cursor
             if self.is_focused {
-                // Insert cursor character
+                // Insert cursor character at the cursor's byte offset
                 let mut display = self.value.clone();
-                if self.cursor_pos < display.len() {
-                    display.insert(self.cursor_pos, '█');
-                } else {
-                    display.push('█');
-                }
+                display.insert(self.byte_offset(self.cursor_pos), '█');
                 Line::from(display)
             } else {
                 Line::from(self.value.clone())
@@ -216,9 +236,12 @@ pub fn url_validator(c: char) -> bool {
     c.is_alphanumeric() || ":/.-_?&=".contains(c)
 }
 
-/// Accepts subreddit name characters (alphanumeric and underscore)
+/// Accepts subreddit name characters (ASCII alphanumeric and underscore)
+///
+/// Reddit only allows ASCII names; `is_alphanumeric` would also accept
+/// Unicode letters that Reddit can never resolve.
 pub fn subreddit_validator(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
+    c.is_ascii_alphanumeric() || c == '_'
 }
 
 #[cfg(test)]
@@ -318,6 +341,51 @@ mod tests {
         assert!(digit_validator('9'));
         assert!(!digit_validator('a'));
         assert!(!digit_validator('-'));
+    }
+
+    #[test]
+    fn test_non_ascii_input_does_not_panic() {
+        // No validator: the widget must be unicode-safe on its own
+        let mut input = TextInput::new();
+        input.handle_key(KeyEvent::from(KeyCode::Char('é')));
+        assert_eq!(input.value, "é");
+        assert_eq!(input.cursor_pos, 1);
+
+        // Typing after a multi-byte char previously panicked on a
+        // non-char-boundary insert
+        input.handle_key(KeyEvent::from(KeyCode::Char('x')));
+        assert_eq!(input.value, "éx");
+
+        // Backspace and Delete across multi-byte chars
+        input.handle_key(KeyEvent::from(KeyCode::Backspace));
+        assert_eq!(input.value, "é");
+        input.handle_key(KeyEvent::from(KeyCode::Home));
+        input.handle_key(KeyEvent::from(KeyCode::Delete));
+        assert_eq!(input.value, "");
+    }
+
+    #[test]
+    fn test_non_ascii_cursor_and_max_length_use_char_counts() {
+        let mut input = TextInput::new().with_max_length(2);
+        input.handle_key(KeyEvent::from(KeyCode::Char('日')));
+        input.handle_key(KeyEvent::from(KeyCode::Char('本')));
+        // 6 bytes but 2 chars: max_length must count chars
+        assert!(!input.handle_key(KeyEvent::from(KeyCode::Char('語'))));
+        assert_eq!(input.value, "日本");
+
+        let input = TextInput::new().with_value("日本");
+        assert_eq!(input.cursor_pos, 2);
+    }
+
+    #[test]
+    fn test_subreddit_validator_rejects_non_ascii() {
+        assert!(subreddit_validator('a'));
+        assert!(subreddit_validator('Z'));
+        assert!(subreddit_validator('0'));
+        assert!(subreddit_validator('_'));
+        assert!(!subreddit_validator('é'));
+        assert!(!subreddit_validator('日'));
+        assert!(!subreddit_validator('-'));
     }
 
     #[test]
