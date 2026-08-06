@@ -145,4 +145,8 @@ impl DatabaseService for SqliteDatabaseService {
     async fn record_if_new(&self, subreddit: &str, post_id: &str) -> Result<bool> {
         crate::database::record_if_new(&self.pool, subreddit, post_id).await
     }
+
+    async fn is_post_notified(&self, subreddit: &str, post_id: &str) -> Result<bool> {
+        crate::database::is_post_notified(&self.pool, subreddit, post_id).await
+    }
 }

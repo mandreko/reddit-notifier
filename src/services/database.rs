@@ -131,4 +131,7 @@ pub trait DatabaseService: Send + Sync {
     /// # Returns
     /// `true` if the post was newly inserted, `false` if it already existed
     async fn record_if_new(&self, subreddit: &str, post_id: &str) -> Result<bool>;
+
+    /// Check whether a post has already been recorded as notified
+    async fn is_post_notified(&self, subreddit: &str, post_id: &str) -> Result<bool>;
 }

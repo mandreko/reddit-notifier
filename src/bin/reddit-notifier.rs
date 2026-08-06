@@ -59,8 +59,12 @@ async fn main() -> Result<()> {
     // Create database service
     let db = Arc::new(SqliteDatabaseService::new(pool));
 
+    // reqwest has no default timeouts; without these a single hung socket
+    // (to Reddit or a webhook) wedges the poll loop forever
     let client = Client::builder()
         .user_agent(cfg.reddit_user_agent.clone())
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
         .build()?;
 
     // Wait for subreddits to be configured
@@ -105,7 +109,7 @@ async fn main() -> Result<()> {
     info!("Reddit notifier is running. Press Ctrl+C to shutdown gracefully.");
 
     // Race the poller against the shutdown signal
-    match race_with_shutdown(poll_combined_subreddits_loop(db, client, subreddits, rate_limiter)).await? {
+    match race_with_shutdown(poll_combined_subreddits_loop(db, client, rate_limiter)).await? {
         ShutdownRace::Shutdown => {
             info!("Received shutdown signal, cleaning up...");
         }

@@ -362,4 +362,11 @@ impl DatabaseService for MockDatabaseService {
 
         Ok(true)
     }
+
+    async fn is_post_notified(&self, subreddit: &str, post_id: &str) -> Result<bool> {
+        let posts = self.posts.lock().unwrap();
+        Ok(posts
+            .iter()
+            .any(|p| p.subreddit == subreddit && p.post_id == post_id))
+    }
 }

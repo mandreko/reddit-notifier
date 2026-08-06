@@ -82,8 +82,11 @@ pub async fn all_subreddit_endpoint_mappings(
             note: row.get::<Option<String>, _>("note"),
         };
 
+        // Key by lowercase name: subscriptions store user input, but Reddit
+        // returns the canonical display name (e.g. "AskReddit"), so lookups
+        // must be case-insensitive.
         mappings
-            .entry(subreddit)
+            .entry(subreddit.to_lowercase())
             .or_default()
             .push(endpoint);
     }
@@ -105,6 +108,21 @@ pub async fn record_if_new(pool: &SqlitePool, subreddit: &str, post_id: &str) ->
     .await?;
 
     Ok(res.rows_affected() == 1)
+}
+
+/// Returns true if the (subreddit, post_id) has already been recorded.
+pub async fn is_post_notified(pool: &SqlitePool, subreddit: &str, post_id: &str) -> Result<bool> {
+    let row = sqlx::query(
+        r#"
+        SELECT 1 FROM notified_posts WHERE subreddit = ?1 AND post_id = ?2
+        "#,
+    )
+    .bind(subreddit)
+    .bind(post_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.is_some())
 }
 
 // =============================================================================
@@ -147,7 +165,9 @@ pub async fn create_subscription(pool: &SqlitePool, subreddit: &str) -> Result<i
         VALUES (?1)
         "#,
     )
-    .bind(subreddit)
+    // Store lowercase: subreddit names are case-insensitive on Reddit's side,
+    // and the poller keys its endpoint mappings by lowercase name.
+    .bind(subreddit.to_lowercase())
     .execute(pool)
     .await?;
 
@@ -503,6 +523,65 @@ pub async fn get_post_statistics(pool: &SqlitePool) -> Result<Vec<(String, i64)>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!().run(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn test_record_if_new_and_is_post_notified() {
+        let pool = test_pool().await;
+
+        assert!(!is_post_notified(&pool, "rust", "p1").await.unwrap());
+        assert!(record_if_new(&pool, "rust", "p1").await.unwrap());
+        assert!(is_post_notified(&pool, "rust", "p1").await.unwrap());
+
+        // Second insert is ignored
+        assert!(!record_if_new(&pool, "rust", "p1").await.unwrap());
+        // Different post id is independent
+        assert!(!is_post_notified(&pool, "rust", "p2").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_create_subscription_normalizes_case() {
+        let pool = test_pool().await;
+
+        let id = create_subscription(&pool, "AskReddit").await.unwrap();
+        let stored: String = sqlx::query_scalar("SELECT subreddit FROM subscriptions WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, "askreddit");
+    }
+
+    #[tokio::test]
+    async fn test_mappings_are_keyed_lowercase_even_for_legacy_rows() {
+        let pool = test_pool().await;
+
+        // Simulate a pre-normalization row inserted with mixed case
+        // (e.g. via the README's raw SQL)
+        sqlx::query("INSERT INTO subscriptions (subreddit) VALUES ('AskReddit')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let sub_id: i64 = sqlx::query_scalar("SELECT id FROM subscriptions WHERE subreddit = 'AskReddit'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let ep_id = create_endpoint(&pool, "discord", "{}", None).await.unwrap();
+        link_subscription_endpoint(&pool, sub_id, ep_id).await.unwrap();
+
+        let mappings = all_subreddit_endpoint_mappings(&pool).await.unwrap();
+        assert!(
+            mappings.contains_key("askreddit"),
+            "mapping keys must be lowercase so lookups by Reddit's canonical name match; got keys: {:?}",
+            mappings.keys().collect::<Vec<_>>()
+        );
+        assert_eq!(mappings["askreddit"].len(), 1);
+    }
 
     #[tokio::test]
     async fn test_cleanup_old_posts() {
