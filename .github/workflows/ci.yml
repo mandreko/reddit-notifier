@@ -22,7 +22,8 @@ jobs:
         with:
           persist-credentials: false
       - run: cargo check
-      - run: cargo clippy
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --all-targets
 
   determine-push:
     runs-on: ubuntu-latest
