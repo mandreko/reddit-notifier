@@ -24,17 +24,7 @@ impl AppConfig {
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(DEFAULT_RATE_LIMIT);
 
-        let rate_limit_per_minute = if requested_rate > MAX_RATE_LIMIT {
-            tracing::warn!(
-                "REDDIT_RATE_LIMIT_PER_MINUTE is set to {}, which exceeds the safe maximum of {}. Capping at {} req/min to avoid Reddit API bans.",
-                requested_rate,
-                MAX_RATE_LIMIT,
-                MAX_RATE_LIMIT
-            );
-            MAX_RATE_LIMIT
-        } else {
-            requested_rate
-        };
+        let rate_limit_per_minute = clamp_rate_limit(requested_rate, MAX_RATE_LIMIT);
 
         let reddit_user_agent = std::env::var("REDDIT_USER_AGENT")
             .unwrap_or_else(|_| {
@@ -49,5 +39,51 @@ impl AppConfig {
             rate_limit_per_minute,
             reddit_user_agent,
         })
+    }
+}
+
+/// Clamp the requested rate limit to [1, max].
+///
+/// The lower bound matters: the rate limiter divides 60s by this value, so 0
+/// would panic at startup with a divide-by-zero (and with `panic = "abort"`
+/// plus a container restart policy, that becomes a crash loop).
+fn clamp_rate_limit(requested: u32, max: u32) -> u32 {
+    if requested > max {
+        tracing::warn!(
+            "REDDIT_RATE_LIMIT_PER_MINUTE is set to {}, which exceeds the safe maximum of {}. Capping at {} req/min to avoid Reddit API bans.",
+            requested,
+            max,
+            max
+        );
+        max
+    } else if requested == 0 {
+        tracing::warn!(
+            "REDDIT_RATE_LIMIT_PER_MINUTE is set to 0, which would disable polling entirely. Using 1 req/min instead."
+        );
+        1
+    } else {
+        requested
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamp_rate_limit_zero_becomes_one() {
+        assert_eq!(clamp_rate_limit(0, 45), 1);
+    }
+
+    #[test]
+    fn clamp_rate_limit_caps_at_max() {
+        assert_eq!(clamp_rate_limit(100, 45), 45);
+    }
+
+    #[test]
+    fn clamp_rate_limit_passes_through_valid_values() {
+        assert_eq!(clamp_rate_limit(1, 45), 1);
+        assert_eq!(clamp_rate_limit(4, 45), 4);
+        assert_eq!(clamp_rate_limit(45, 45), 45);
     }
 }
