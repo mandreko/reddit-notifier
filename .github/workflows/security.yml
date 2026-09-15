@@ -4,6 +4,10 @@ on:
     paths:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+  # Advisories are published against dependencies we never touch, so the push
+  # trigger alone leaves stale green checks. Re-audit the lockfile daily.
+  schedule:
+    - cron: "0 6 * * *"
   workflow_dispatch:
 
 # Cancel in-progress runs when a new commit is pushed
@@ -25,4 +29,3 @@ jobs:
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          ignore: RUSTSEC-2023-0071
