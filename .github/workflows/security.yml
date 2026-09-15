@@ -4,6 +4,8 @@ on:
     paths:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      # Changes here alter what the audit suppresses, so re-run on them too.
+      - ".cargo/audit.toml"
   # Advisories are published against dependencies we never touch, so the push
   # trigger alone leaves stale green checks. Re-audit the lockfile daily.
   schedule:
