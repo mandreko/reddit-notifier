@@ -13,13 +13,52 @@ This app is designed to be:
 
 ## 📦 Features
 
-- Polls `/r/<subreddit>/new.json` at a configured interval
+- Polls for new posts through a pluggable **post source** (see below):
+    - ✅ Arctic Shift archive API (default, free, no API key)
+    - ✅ Reddit's `/r/<subreddit>/new.json` listing (legacy; being shut down by Reddit)
 - Deduplicates notifications across app restarts using a persistent database
 - Supports multiple users with different notification preferences
 - Sends notifications to:
     - ✅ Discord (via webhook)
     - ✅ Pushover (via API)
-- Uses only one polling task per subreddit, even with many subscribers
+- One polling loop batches every subscribed subreddit and rate limits upstream requests
+
+---
+
+## 📡 Post Sources
+
+Reddit announced on 2026-09-30 that it is retiring every free way to read new posts:
+RSS feeds end on 2026-11-13, new public API registrations closed on 2026-10-31, and
+all public Data API access ends in March 2027. Unauthenticated `.json` listings
+already return `403` from many IP ranges. The daemon therefore reads posts through a
+`PostSource` abstraction selected with the `POST_SOURCE` environment variable.
+
+### `arctic_shift` (default)
+
+[Arctic Shift](https://github.com/ArthurHeitmann/arctic_shift) is a free, third-party
+archive of Reddit that ingests new posts within about 30 seconds and serves them from
+a keyless JSON API at `https://arctic-shift.photon-reddit.com`.
+
+- Each subreddit costs one request per cycle. At the default
+  `ARCTIC_SHIFT_RATE_LIMIT_PER_MINUTE=30`, 20 subreddits are fully refreshed roughly
+  every 40 seconds and 100 subreddits every ~3.5 minutes.
+- Requests never burst; `429` responses are honoured using the service's
+  `X-RateLimit-Reset` headers.
+- Caveats: it is run by one person with **no uptime guarantee**, posts that moderators
+  later remove still appear (they are archived at submission time), and on a brand-new
+  database the first cycle notifies about every post from the last 24 hours (up to 100
+  per subreddit), exactly as the legacy source did.
+
+### `reddit_json` (legacy)
+
+The original data path: `https://www.reddit.com/r/sub1+sub2/new.json` with up to 100
+subreddits per request. Keep using it only where Reddit does not block your IP, and
+expect it to stop working by March 2027.
+
+```bash
+POST_SOURCE=reddit_json
+REDDIT_RATE_LIMIT_PER_MINUTE=4
+```
 
 ---
 
@@ -38,7 +77,9 @@ cargo build --release
 Copy .env.example to .env and fill in the values:
 ```bash
 DATABASE_URL=sqlite://data.db
-REDDIT_RATE_LIMIT_PER_MINUTE=4
+POST_SOURCE=arctic_shift
+ARCTIC_SHIFT_RATE_LIMIT_PER_MINUTE=30
+POLL_INTERVAL_SECS=30
 REDDIT_USER_AGENT=reddit_notifier/1.0 (by u/yourusername)
 
 # Optional: Database connection retry configuration
@@ -49,10 +90,14 @@ REDDIT_USER_AGENT=reddit_notifier/1.0 (by u/yourusername)
 
 **Required Variables:**
 - `DATABASE_URL` - SQLite database path
-- `REDDIT_USER_AGENT` - User agent string (Reddit requires this to identify your app and username)
 
 **Optional Variables:**
-- `REDDIT_RATE_LIMIT_PER_MINUTE` - Number of Reddit polls per minute (default: 4)
+- `POST_SOURCE` - `arctic_shift` (default) or `reddit_json`; see [Post Sources](#-post-sources)
+- `ARCTIC_SHIFT_RATE_LIMIT_PER_MINUTE` - Requests per minute to Arctic Shift (default: 30, max: 120)
+- `ARCTIC_SHIFT_BASE_URL` - Override the Arctic Shift base URL, e.g. for a mirror or tests
+- `REDDIT_RATE_LIMIT_PER_MINUTE` - Requests per minute to Reddit when `POST_SOURCE=reddit_json` (default: 4, max: 45)
+- `POLL_INTERVAL_SECS` - Minimum seconds between the start of two poll cycles (default: 30 for `arctic_shift`, 0 for `reddit_json`)
+- `REDDIT_USER_AGENT` - User agent sent to the upstream source (default: `reddit_notifier/<version> (https://github.com/mandreko/reddit-notifier)`)
 - `DB_MAX_RETRIES` - Maximum database connection attempts at startup (default: 5)
 - `DB_INITIAL_DELAY_MS` - Initial delay between retry attempts in milliseconds (default: 500)
 - `DB_MAX_DELAY_MS` - Maximum delay between retry attempts in milliseconds (default: 5000)
