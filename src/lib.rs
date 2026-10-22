@@ -6,4 +6,5 @@ pub mod poller;
 pub mod rate_limiter;
 pub mod services;
 pub mod shutdown;
+pub mod sources;
 pub mod tui;
