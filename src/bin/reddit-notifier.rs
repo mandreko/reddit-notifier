@@ -11,10 +11,11 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use reddit_notifier::db_connection::{connect_with_retry, ConnectionConfig};
 use reddit_notifier::models::config::AppConfig;
-use reddit_notifier::poller::poll_combined_subreddits_loop;
+use reddit_notifier::poller::poll_loop;
 use reddit_notifier::rate_limiter::RateLimiter;
 use reddit_notifier::services::{DatabaseService, SqliteDatabaseService};
 use reddit_notifier::shutdown::{race_with_shutdown, ShutdownRace};
+use reddit_notifier::sources::build_post_source;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -61,7 +62,11 @@ async fn main() -> Result<()> {
 
     let client = Client::builder()
         .user_agent(cfg.reddit_user_agent.clone())
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
         .build()?;
+
+    let source = build_post_source(&cfg, client.clone());
 
     // Wait for subreddits to be configured
     // Check every 10 seconds until subscriptions exist in the database
@@ -87,25 +92,33 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Create rate limiter for Reddit API calls
-    // Rate limiter uses token bucket algorithm
-    // Max tokens: rate_limit_per_minute (allows burst requests)
+    // Token-bucket rate limiter for upstream requests.
+    // Max tokens: per-source burst allowance (1 for Arctic Shift, = rate for Reddit JSON)
     // Refill rate: 60 seconds / rate_limit_per_minute (spreads requests evenly)
-    // E.g., 4 req/min = 1 token every 15 seconds
     let rate_limiter = RateLimiter::new(
-        cfg.rate_limit_per_minute,
+        cfg.rate_limit_burst,
         Duration::from_secs(60) / cfg.rate_limit_per_minute,
     );
 
     info!(
-        "Starting combined poller for {} subreddit(s) with rate limiting ({} req/min)",
+        "Starting poller for {} subreddit(s) via {} ({} req/min, burst {}, min cycle interval {}s)",
         subreddits.len(),
-        cfg.rate_limit_per_minute
+        source.name(),
+        cfg.rate_limit_per_minute,
+        cfg.rate_limit_burst,
+        cfg.poll_interval.as_secs()
     );
     info!("Reddit notifier is running. Press Ctrl+C to shutdown gracefully.");
 
     // Race the poller against the shutdown signal
-    match race_with_shutdown(poll_combined_subreddits_loop(db, client, subreddits, rate_limiter)).await? {
+    match race_with_shutdown(poll_loop(
+        db,
+        source,
+        client,
+        subreddits,
+        rate_limiter,
+        cfg.poll_interval,
+    )).await? {
         ShutdownRace::Shutdown => {
             info!("Received shutdown signal, cleaning up...");
         }
