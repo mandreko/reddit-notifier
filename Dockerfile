@@ -34,7 +34,8 @@ USER 65534
 VOLUME /data
 # Set default ENV values, which user can over-ride
 ENV DATABASE_URL=sqlite:///data/reddit-notifier.db
-ENV POLL_INTERVAL_SECS=60
+ENV POST_SOURCE=arctic_shift
+ENV POLL_INTERVAL_SECS=30
 ENV REDDIT_USER_AGENT="reddit_notifier (https://github.com/mandreko/reddit-notifier)"
 
 # Healthcheck: Verify database file exists and is readable

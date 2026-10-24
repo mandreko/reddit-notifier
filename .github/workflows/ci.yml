@@ -21,8 +21,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - run: cargo check
-      - run: cargo clippy
+      - run: cargo check --all-targets
+      - run: cargo clippy --all-targets
+      - run: cargo test --all-targets
 
   determine-push:
     runs-on: ubuntu-latest
