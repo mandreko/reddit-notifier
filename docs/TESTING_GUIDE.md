@@ -296,6 +296,40 @@ async fn test_delete_nonexistent() {
 }
 ```
 
+## Testing HTTP Clients
+
+Code that talks to an upstream service (the post sources in `src/sources/` and the
+notifiers) is tested against [`wiremock`](https://docs.rs/wiremock), which starts a real
+HTTP server on a random local port. Point the component at `server.uri()` and describe
+the expected request with matchers:
+
+```rust
+use wiremock::matchers::{method, path, query_param};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+#[tokio::test]
+async fn fetch_429_is_rate_limited() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/posts/search"))
+        .and(query_param("subreddit", "rust"))
+        .respond_with(ResponseTemplate::new(429).insert_header("x-ratelimit-reset", "17"))
+        .expect(1)                       // verified when `server` drops
+        .mount(&server)
+        .await;
+
+    let source = ArcticShiftSource::new(Client::new(), server.uri());
+    assert!(matches!(source.fetch_new(&["rust".into()]).await, Err(FetchError::RateLimited { .. })));
+}
+```
+
+Guidelines:
+- Build the client with a short `timeout` so failure-path tests finish quickly.
+- Cover every branch the code distinguishes: success, empty, 429, structured API error,
+  malformed body, and transport failure.
+- For the poller, implement `PostSource` with a scripted fake instead of HTTP, and use
+  `#[tokio::test(start_paused = true)]` when the code under test sleeps.
+
 ## Testing Widgets
 
 Widgets should be tested in isolation from screens.
